@@ -141,12 +141,14 @@ metadata:
     namespace: bank-vm-h93q9
     labels:
         app: backend
+        backend-lb: vm-lb-selector
 spec:
     # Adjust these to a class, image, and StorageClass that exist in your
     # Supervisor namespace -- see the README.
     className: best-effort-small
-    imageName: vmi-fedora-40
-    storageClass: wcpglobal-storage-profile
+    # Friendly image name: noble-server-cloudimg-amd64
+    imageName: vmi-0f70942d16a5bd4ed
+    storageClass: vsan-default-storage-policy
     powerState: PoweredOn
     network:
         hostName: bank-backend
