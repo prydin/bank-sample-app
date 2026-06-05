@@ -1,10 +1,10 @@
-# Backend running inside a KubeVirt VM (Fedora cloud image).
+# Backend running inside a VMware VM Operator VirtualMachine (Fedora cloud image).
 # cloud-init installs Node.js, writes a tiny Express+pg app, and starts it
-# under systemd. The VM is selected by the `backend` Service the same way
-# a pod would be, via labels on the VMI's launcher pod.
+# under systemd. The VM is selected by the `backend` VirtualMachineService
+# via labels on the VirtualMachine itself.
 
-apiVersion: v1
-kind: Service
+apiVersion: vmoperator.vmware.com/v1alpha5
+kind: VirtualMachineService
 metadata:
     name: backend
     namespace: bank-vm
@@ -13,155 +13,145 @@ spec:
     selector:
         app: backend
     ports:
-        - port: 4000
+        - name: http
+          protocol: TCP
+          port: 4000
           targetPort: 4000
-          name: http
 ---
-apiVersion: kubevirt.io/v1
+apiVersion: v1
+kind: Secret
+metadata:
+    name: backend-bootstrap
+    namespace: bank-vm
+type: Opaque
+stringData:
+    user-data: |
+        #cloud-config
+        hostname: bank-backend
+        package_update: true
+        packages:
+          - nodejs
+          - npm
+        write_files:
+          - path: /opt/bank-backend/package.json
+            permissions: '0644'
+            content: |
+              {
+                "name": "bank-backend",
+                "version": "1.0.0",
+                "private": true,
+                "type": "module",
+                "dependencies": {
+                  "cors": "^2.8.5",
+                  "express": "^4.19.2",
+                  "pg": "^8.12.0"
+                }
+              }
+          - path: /opt/bank-backend/index.js
+            permissions: '0644'
+            content: |
+              import express from 'express';
+              import cors from 'cors';
+              import pg from 'pg';
+
+              const { Pool } = pg;
+              const pool = new Pool({
+                connectionString: process.env.DATABASE_URL ?? 'postgres://bank:bank@postgres:5432/bankdb',
+              });
+
+              const app = express();
+              app.use(cors({ origin: process.env.CORS_ORIGIN ?? '*' }));
+              app.use(express.json());
+
+              app.get('/api/health', (_req, res) => res.json({ ok: true }));
+
+              app.get('/api/accounts', async (_req, res, next) => {
+                try {
+                  const { rows } = await pool.query(
+                    `SELECT id, name, type, account_number, balance_cents, currency, opened_at
+                     FROM accounts
+                     ORDER BY CASE type WHEN 'checking' THEN 1 WHEN 'savings' THEN 2 WHEN 'credit' THEN 3 ELSE 4 END, id`
+                  );
+                  res.json(rows);
+                } catch (err) { next(err); }
+              });
+
+              app.get('/api/accounts/:id', async (req, res, next) => {
+                try {
+                  const id = Number(req.params.id);
+                  if (!Number.isInteger(id)) return res.status(400).json({ error: 'invalid id' });
+                  const { rows } = await pool.query(
+                    'SELECT id, name, type, account_number, balance_cents, currency, opened_at FROM accounts WHERE id = $1',
+                    [id]
+                  );
+                  if (rows.length === 0) return res.status(404).json({ error: 'not found' });
+                  res.json(rows[0]);
+                } catch (err) { next(err); }
+              });
+
+              app.get('/api/accounts/:id/transactions', async (req, res, next) => {
+                try {
+                  const id = Number(req.params.id);
+                  if (!Number.isInteger(id)) return res.status(400).json({ error: 'invalid id' });
+                  const { rows } = await pool.query(
+                    `SELECT id, account_id, posted_at, description, merchant, category, amount_cents
+                     FROM transactions WHERE account_id = $1 ORDER BY posted_at DESC LIMIT 50`,
+                    [id]
+                  );
+                  res.json(rows);
+                } catch (err) { next(err); }
+              });
+
+              app.use((err, _req, res, _next) => {
+                console.error(err);
+                res.status(500).json({ error: 'internal server error' });
+              });
+
+              const port = Number(process.env.PORT ?? 4000);
+              app.listen(port, () => console.log(`Bank API listening on ${port}`));
+          - path: /etc/systemd/system/bank-backend.service
+            permissions: '0644'
+            content: |
+              [Unit]
+              Description=Bank backend (Node.js)
+              After=network-online.target
+              Wants=network-online.target
+
+              [Service]
+              Environment=DATABASE_URL=postgres://bank:bank@postgres:5432/bankdb
+              Environment=PORT=4000
+              Environment=CORS_ORIGIN=*
+              Environment=NODE_ENV=production
+              WorkingDirectory=/opt/bank-backend
+              ExecStart=/usr/bin/node index.js
+              Restart=always
+              RestartSec=5
+
+              [Install]
+              WantedBy=multi-user.target
+        runcmd:
+          - bash -lc "cd /opt/bank-backend && npm install --omit=dev"
+          - systemctl daemon-reload
+          - systemctl enable --now bank-backend
+---
+apiVersion: vmoperator.vmware.com/v1alpha5
 kind: VirtualMachine
 metadata:
     name: backend
     namespace: bank-vm
+    labels:
+        app: backend
 spec:
-    runStrategy: Always
-    template:
-        metadata:
-            labels:
-                app: backend
-                kubevirt.io/vm: backend
-        spec:
-            domain:
-                cpu:
-                    cores: 1
-                memory:
-                    guest: 768Mi
-                devices:
-                    disks:
-                        - name: containerdisk
-                          disk:
-                              bus: virtio
-                        - name: cloudinitdisk
-                          disk:
-                              bus: virtio
-                    interfaces:
-                        - name: default
-                          masquerade: {}
-                    rng: {}
-            networks:
-                - name: default
-                  pod: {}
-            terminationGracePeriodSeconds: 30
-            volumes:
-                - name: containerdisk
-                  containerDisk:
-                      image: quay.io/containerdisks/fedora:40
-                - name: cloudinitdisk
-                  cloudInitNoCloud:
-                      userData: |
-                          #cloud-config
-                          hostname: bank-backend
-                          package_update: true
-                          packages:
-                            - nodejs
-                            - npm
-                          write_files:
-                            - path: /opt/bank-backend/package.json
-                              permissions: '0644'
-                              content: |
-                                {
-                                  "name": "bank-backend",
-                                  "version": "1.0.0",
-                                  "private": true,
-                                  "type": "module",
-                                  "dependencies": {
-                                    "cors": "^2.8.5",
-                                    "express": "^4.19.2",
-                                    "pg": "^8.12.0"
-                                  }
-                                }
-                            - path: /opt/bank-backend/index.js
-                              permissions: '0644'
-                              content: |
-                                import express from 'express';
-                                import cors from 'cors';
-                                import pg from 'pg';
-
-                                const { Pool } = pg;
-                                const pool = new Pool({
-                                  connectionString: process.env.DATABASE_URL ?? 'postgres://bank:bank@postgres:5432/bankdb',
-                                });
-
-                                const app = express();
-                                app.use(cors({ origin: process.env.CORS_ORIGIN ?? '*' }));
-                                app.use(express.json());
-
-                                app.get('/api/health', (_req, res) => res.json({ ok: true }));
-
-                                app.get('/api/accounts', async (_req, res, next) => {
-                                  try {
-                                    const { rows } = await pool.query(
-                                      `SELECT id, name, type, account_number, balance_cents, currency, opened_at
-                                       FROM accounts
-                                       ORDER BY CASE type WHEN 'checking' THEN 1 WHEN 'savings' THEN 2 WHEN 'credit' THEN 3 ELSE 4 END, id`
-                                    );
-                                    res.json(rows);
-                                  } catch (err) { next(err); }
-                                });
-
-                                app.get('/api/accounts/:id', async (req, res, next) => {
-                                  try {
-                                    const id = Number(req.params.id);
-                                    if (!Number.isInteger(id)) return res.status(400).json({ error: 'invalid id' });
-                                    const { rows } = await pool.query(
-                                      'SELECT id, name, type, account_number, balance_cents, currency, opened_at FROM accounts WHERE id = $1',
-                                      [id]
-                                    );
-                                    if (rows.length === 0) return res.status(404).json({ error: 'not found' });
-                                    res.json(rows[0]);
-                                  } catch (err) { next(err); }
-                                });
-
-                                app.get('/api/accounts/:id/transactions', async (req, res, next) => {
-                                  try {
-                                    const id = Number(req.params.id);
-                                    if (!Number.isInteger(id)) return res.status(400).json({ error: 'invalid id' });
-                                    const { rows } = await pool.query(
-                                      `SELECT id, account_id, posted_at, description, merchant, category, amount_cents
-                                       FROM transactions WHERE account_id = $1 ORDER BY posted_at DESC LIMIT 50`,
-                                      [id]
-                                    );
-                                    res.json(rows);
-                                  } catch (err) { next(err); }
-                                });
-
-                                app.use((err, _req, res, _next) => {
-                                  console.error(err);
-                                  res.status(500).json({ error: 'internal server error' });
-                                });
-
-                                const port = Number(process.env.PORT ?? 4000);
-                                app.listen(port, () => console.log(`Bank API listening on ${port}`));
-                            - path: /etc/systemd/system/bank-backend.service
-                              permissions: '0644'
-                              content: |
-                                [Unit]
-                                Description=Bank backend (Node.js)
-                                After=network-online.target
-                                Wants=network-online.target
-
-                                [Service]
-                                Environment=DATABASE_URL=postgres://bank:bank@postgres:5432/bankdb
-                                Environment=PORT=4000
-                                Environment=CORS_ORIGIN=*
-                                Environment=NODE_ENV=production
-                                WorkingDirectory=/opt/bank-backend
-                                ExecStart=/usr/bin/node index.js
-                                Restart=always
-                                RestartSec=5
-
-                                [Install]
-                                WantedBy=multi-user.target
-                          runcmd:
-                            - bash -lc "cd /opt/bank-backend && npm install --omit=dev"
-                            - systemctl daemon-reload
-                            - systemctl enable --now bank-backend
+    # Adjust these to a class, image, and StorageClass that exist in your
+    # Supervisor namespace -- see the README.
+    className: best-effort-small
+    imageName: vmi-fedora-40
+    storageClass: wcpglobal-storage-profile
+    powerState: PoweredOn
+    network:
+        hostName: bank-backend
+    bootstrap:
+        cloudInit:
+            rawCloudConfig:
+                name: backend-bootstrap
+                key: user-data
