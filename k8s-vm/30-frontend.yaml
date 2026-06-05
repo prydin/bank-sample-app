@@ -28,6 +28,13 @@ stringData:
     user-data: |
         #cloud-config
         hostname: bank-frontend
+        users:
+          - name: ubuntu
+            sudo: ALL=(ALL) NOPASSWD:ALL
+            shell: /bin/bash
+            lock_passwd: false
+            ssh_authorized_keys:
+              - ssh-rsa AAAAB3NzaC1yc2EAAAADAQABAAABAQC7g2UVzeb551EVgpvy24KlswRL7Nr5cbJm/tuObWuw2HpUZ5HtoFyV3SbRyWWAU+CJDw0OaZVoxOGB5zV8jyKWoVrU4HAB7dABZNXXBreAbat7h9kf03KeJofRO/KFqj47FDJhj2yE3nCArK4aeOiuum4p7t7KL6zFXbXs7DGxeuEtxONLvMDqhyDyyQSJ7VUlA8AnO7mdHtnZ1kfTE/EHH0lj3qxaiZqkNC2onn/d64ctsGcmzgCt9BkgooQNd3c8HMCVs5LIZrc2ZbZvGGOvmApZwNCnKooTFGDawTNflPEV3FNdN6VN3lrR3mhaVKN5N2BS3froY/gY3Tq4a0kd holuser@console
         package_update: true
         package_upgrade: false
         packages:
