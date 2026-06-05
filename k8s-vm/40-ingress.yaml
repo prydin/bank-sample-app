@@ -4,13 +4,13 @@ apiVersion: networking.k8s.io/v1
 kind: Ingress
 metadata:
     name: bank
-    namespace: bank-vm
+    namespace: bank-vm-h93q9
     annotations:
         nginx.ingress.kubernetes.io/rewrite-target: /
 spec:
     ingressClassName: nginx
     rules:
-        - host: bank-vm.local
+        - host: bank-vm-h93q9.local
           http:
               paths:
                   - path: /

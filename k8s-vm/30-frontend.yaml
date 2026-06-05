@@ -5,7 +5,7 @@ apiVersion: apps/v1
 kind: Deployment
 metadata:
     name: frontend
-    namespace: bank-vm
+    namespace: bank-vm-h93q9
     labels:
         app: frontend
 spec:
@@ -48,7 +48,7 @@ apiVersion: v1
 kind: Service
 metadata:
     name: frontend
-    namespace: bank-vm
+    namespace: bank-vm-h93q9
 spec:
     type: ClusterIP
     selector:
