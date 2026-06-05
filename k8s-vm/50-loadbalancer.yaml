@@ -1,0 +1,19 @@
+apiVersion: vmoperator.vmware.com/v1alpha5
+kind: VirtualMachineService
+metadata:
+  name: backend-lb
+  namespace: bank-vm-h93q9
+spec:
+  selector:
+    backend-lb: vm-lb-selector
+  type: LoadBalancer
+  ports:
+    - name: http
+      protocol: TCP
+      port: 80
+      targetPort: 4000
+    - name: ssh
+      protocol: TCP
+      port: 22
+      targetPort: 22
+
