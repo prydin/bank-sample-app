@@ -127,8 +127,10 @@ spec:
     #   kubectl get storageclass
     # to discover what is available in your Supervisor namespace.
     className: best-effort-small
-    imageName: vmi-fedora-40
-    storageClass: wcpglobal-storage-profile
+    # Friendly image name: noble-server-cloudimg-amd64
+    imageName: vmi-0f70942d16a5bd4ed
+    storageClass: vsan-default-storage-policy
+
     powerState: PoweredOn
     network:
         hostName: bank-postgres
