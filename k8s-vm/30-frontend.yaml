@@ -43,6 +43,12 @@ stringData:
           - git
           - nginx
         runcmd:
+          # Map the upstream name `backend` (used in frontend/nginx.conf) to the
+          # backend VM's IP on the workload network. Workload DNS does not know
+          # K8s Service names or VM hostnames, so we add a static /etc/hosts
+          # entry. Update this IP if the backend VM is recreated and gets a new
+          # one (`kubectl -n bank-vm-h93q9 get vm backend -o jsonpath='{.status.network.primaryIP4}'`).
+          - echo "172.16.203.71 backend" >> /etc/hosts
           - bash -lc "curl -fsSL https://deb.nodesource.com/setup_20.x | bash -"
           - apt-get install -y nodejs
           - git clone https://github.com/prydin/bank-sample-app.git /opt/bank-app
