@@ -1,19 +1,22 @@
+# User-facing LoadBalancer in front of the nginx frontend VM.
+# Requires a LoadBalancer provider in the cluster (NSX, Avi, MetalLB, kube-vip, ...).
+# `kubectl -n bank-vm-h93q9 get vmservice frontend-lb` will show the external IP.
 apiVersion: vmoperator.vmware.com/v1alpha5
 kind: VirtualMachineService
 metadata:
-  name: backend-lb
-  namespace: bank-vm-h93q9
+    name: frontend-lb
+    namespace: bank-vm-h93q9
 spec:
-  selector:
-    backend-lb: vm-lb-selector
-  type: LoadBalancer
-  ports:
-    - name: http
-      protocol: TCP
-      port: 80
-      targetPort: 4000
-    - name: ssh
-      protocol: TCP
-      port: 22
-      targetPort: 22
+    type: LoadBalancer
+    selector:
+        app: frontend
+    ports:
+        - name: http
+          protocol: TCP
+          port: 80
+          targetPort: 80
+        - name: ssh
+          protocol: TCP
+          port: 22
+          targetPort: 22
 

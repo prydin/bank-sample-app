@@ -1,51 +1,10 @@
-# Frontend stays as a regular pod (only the backend and database are VMs).
-# Same nginx image built from frontend/Dockerfile.prod.
+# Frontend running inside a VMware VM Operator VirtualMachine (Ubuntu cloud image).
+# cloud-init installs Node.js 20 + nginx, clones this repo, builds the SPA with
+# `npm run build`, deploys the static assets to nginx, and installs the project's
+# nginx.conf (which reverse-proxies /api/ to the `backend` Service).
 
-apiVersion: apps/v1
-kind: Deployment
-metadata:
-    name: frontend
-    namespace: bank-vm-h93q9
-    labels:
-        app: frontend
-spec:
-    replicas: 1
-    selector:
-        matchLabels:
-            app: frontend
-    template:
-        metadata:
-            labels:
-                app: frontend
-        spec:
-            containers:
-                - name: frontend
-                  image: bank-frontend:latest
-                  imagePullPolicy: IfNotPresent
-                  ports:
-                      - containerPort: 80
-                  readinessProbe:
-                      httpGet:
-                          path: /
-                          port: 80
-                      initialDelaySeconds: 3
-                      periodSeconds: 5
-                  livenessProbe:
-                      httpGet:
-                          path: /
-                          port: 80
-                      initialDelaySeconds: 15
-                      periodSeconds: 20
-                  resources:
-                      requests:
-                          cpu: 25m
-                          memory: 32Mi
-                      limits:
-                          cpu: 100m
-                          memory: 128Mi
----
-apiVersion: v1
-kind: Service
+apiVersion: vmoperator.vmware.com/v1alpha5
+kind: VirtualMachineService
 metadata:
     name: frontend
     namespace: bank-vm-h93q9
@@ -54,6 +13,59 @@ spec:
     selector:
         app: frontend
     ports:
-        - port: 80
+        - name: http
+          protocol: TCP
+          port: 80
           targetPort: 80
-          name: http
+---
+apiVersion: v1
+kind: Secret
+metadata:
+    name: frontend-bootstrap
+    namespace: bank-vm-h93q9
+type: Opaque
+stringData:
+    user-data: |
+        #cloud-config
+        hostname: bank-frontend
+        package_update: true
+        package_upgrade: false
+        packages:
+          - ca-certificates
+          - curl
+          - git
+          - nginx
+        runcmd:
+          - bash -lc "curl -fsSL https://deb.nodesource.com/setup_20.x | bash -"
+          - apt-get install -y nodejs
+          - git clone https://github.com/prydin/bank-sample-app.git /opt/bank-app
+          - bash -lc "cd /opt/bank-app/frontend && npm install && npm run build"
+          - rm -rf /usr/share/nginx/html
+          - cp -r /opt/bank-app/frontend/dist /usr/share/nginx/html
+          - rm -f /etc/nginx/sites-enabled/default
+          - cp /opt/bank-app/frontend/nginx.conf /etc/nginx/conf.d/bank.conf
+          - nginx -t
+          - systemctl restart nginx
+---
+apiVersion: vmoperator.vmware.com/v1alpha5
+kind: VirtualMachine
+metadata:
+    name: frontend
+    namespace: bank-vm-h93q9
+    labels:
+        app: frontend
+spec:
+    # Adjust these to a class, image, and StorageClass that exist in your
+    # Supervisor namespace -- see the README.
+    className: best-effort-small
+    # Friendly image name: noble-server-cloudimg-amd64
+    imageName: vmi-0f70942d16a5bd4ed
+    storageClass: vsan-default-storage-policy
+    powerState: PoweredOn
+    network:
+        hostName: bank-frontend
+    bootstrap:
+        cloudInit:
+            rawCloudConfig:
+                name: frontend-bootstrap
+                key: user-data

@@ -71,7 +71,6 @@ metadata:
     namespace: bank-vm-h93q9
     labels:
         app: backend
-        backend-lb: vm-lb-selector
 spec:
     # Adjust these to a class, image, and StorageClass that exist in your
     # Supervisor namespace -- see the README.
