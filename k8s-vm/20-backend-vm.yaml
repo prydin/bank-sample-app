@@ -1,7 +1,8 @@
-# Backend running inside a VMware VM Operator VirtualMachine (Fedora cloud image).
-# cloud-init installs Node.js, writes a tiny Express+pg app, and starts it
-# under systemd. The VM is selected by the `backend` VirtualMachineService
-# via labels on the VirtualMachine itself.
+# Backend running inside a VMware VM Operator VirtualMachine (Ubuntu cloud image).
+# cloud-init installs Node.js 20 (NodeSource), clones this repo, builds the
+# real TypeScript backend with `npm run build`, and runs it under systemd.
+# The VM is selected by the `backend` VirtualMachineService via labels on
+# the VirtualMachine itself.
 
 apiVersion: vmoperator.vmware.com/v1alpha5
 kind: VirtualMachineService
@@ -29,86 +30,12 @@ stringData:
         #cloud-config
         hostname: bank-backend
         package_update: true
+        package_upgrade: false
         packages:
-          - nodejs
-          - npm
+          - ca-certificates
+          - curl
+          - git
         write_files:
-          - path: /opt/bank-backend/package.json
-            permissions: '0644'
-            content: |
-              {
-                "name": "bank-backend",
-                "version": "1.0.0",
-                "private": true,
-                "type": "module",
-                "dependencies": {
-                  "cors": "^2.8.5",
-                  "express": "^4.19.2",
-                  "pg": "^8.12.0"
-                }
-              }
-          - path: /opt/bank-backend/index.js
-            permissions: '0644'
-            content: |
-              import express from 'express';
-              import cors from 'cors';
-              import pg from 'pg';
-
-              const { Pool } = pg;
-              const pool = new Pool({
-                connectionString: process.env.DATABASE_URL ?? 'postgres://bank:bank@postgres:5432/bankdb',
-              });
-
-              const app = express();
-              app.use(cors({ origin: process.env.CORS_ORIGIN ?? '*' }));
-              app.use(express.json());
-
-              app.get('/api/health', (_req, res) => res.json({ ok: true }));
-
-              app.get('/api/accounts', async (_req, res, next) => {
-                try {
-                  const { rows } = await pool.query(
-                    `SELECT id, name, type, account_number, balance_cents, currency, opened_at
-                     FROM accounts
-                     ORDER BY CASE type WHEN 'checking' THEN 1 WHEN 'savings' THEN 2 WHEN 'credit' THEN 3 ELSE 4 END, id`
-                  );
-                  res.json(rows);
-                } catch (err) { next(err); }
-              });
-
-              app.get('/api/accounts/:id', async (req, res, next) => {
-                try {
-                  const id = Number(req.params.id);
-                  if (!Number.isInteger(id)) return res.status(400).json({ error: 'invalid id' });
-                  const { rows } = await pool.query(
-                    'SELECT id, name, type, account_number, balance_cents, currency, opened_at FROM accounts WHERE id = $1',
-                    [id]
-                  );
-                  if (rows.length === 0) return res.status(404).json({ error: 'not found' });
-                  res.json(rows[0]);
-                } catch (err) { next(err); }
-              });
-
-              app.get('/api/accounts/:id/transactions', async (req, res, next) => {
-                try {
-                  const id = Number(req.params.id);
-                  if (!Number.isInteger(id)) return res.status(400).json({ error: 'invalid id' });
-                  const { rows } = await pool.query(
-                    `SELECT id, account_id, posted_at, description, merchant, category, amount_cents
-                     FROM transactions WHERE account_id = $1 ORDER BY posted_at DESC LIMIT 50`,
-                    [id]
-                  );
-                  res.json(rows);
-                } catch (err) { next(err); }
-              });
-
-              app.use((err, _req, res, _next) => {
-                console.error(err);
-                res.status(500).json({ error: 'internal server error' });
-              });
-
-              const port = Number(process.env.PORT ?? 4000);
-              app.listen(port, () => console.log(`Bank API listening on ${port}`));
           - path: /etc/systemd/system/bank-backend.service
             permissions: '0644'
             content: |
@@ -122,15 +49,18 @@ stringData:
               Environment=PORT=4000
               Environment=CORS_ORIGIN=*
               Environment=NODE_ENV=production
-              WorkingDirectory=/opt/bank-backend
-              ExecStart=/usr/bin/node index.js
+              WorkingDirectory=/opt/bank-app/backend
+              ExecStart=/usr/bin/node dist/index.js
               Restart=always
               RestartSec=5
 
               [Install]
               WantedBy=multi-user.target
         runcmd:
-          - bash -lc "cd /opt/bank-backend && npm install --omit=dev"
+          - bash -lc "curl -fsSL https://deb.nodesource.com/setup_20.x | bash -"
+          - apt-get install -y nodejs
+          - git clone https://github.com/prydin/bank-sample-app.git /opt/bank-app
+          - bash -lc "cd /opt/bank-app/backend && npm install && npm run build"
           - systemctl daemon-reload
           - systemctl enable --now bank-backend
 ---

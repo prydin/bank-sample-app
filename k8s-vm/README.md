@@ -1,6 +1,8 @@
 # Northwind Bank on VMware VM Operator VMs
 
-Same app, but the **backend** and **database** run inside [VMware VM Operator](https://vm-operator.readthedocs.io/) `VirtualMachine`s (Fedora cloud image, bootstrapped via cloud-init). The **frontend** still runs as a regular pod.
+Same app, but the **backend** and **database** run inside [VMware VM Operator](https://vm-operator.readthedocs.io/) `VirtualMachine`s (Ubuntu cloud image, bootstrapped via cloud-init). The **frontend** still runs as a regular pod.
+
+The VMs do not carry an inlined copy of the app source. cloud-init `git clone`s this repository into the guest and runs the real `db/init.sql` + `db/seed.sql` (Postgres VM) or builds the real TypeScript backend with `npm run build` (backend VM).
 
 ## Prerequisites
 
@@ -22,8 +24,8 @@ kubectl get storageclass
 | File | Purpose |
 |------|---------|
 | `00-namespace.yaml`     | `bank-vm-h93q9` namespace |
-| `10-postgres-vm.yaml`   | Postgres `VirtualMachine` + `VirtualMachineService` + bootstrap `Secret` (cloud-init installs postgresql-server and seeds the DB) |
-| `20-backend-vm.yaml`    | Node.js backend `VirtualMachine` + `VirtualMachineService` + bootstrap `Secret` (cloud-init installs nodejs, writes the Express app, runs it under systemd) |
+| `10-postgres-vm.yaml`   | Postgres `VirtualMachine` + `VirtualMachineService` + bootstrap `Secret` (cloud-init `apt install`s postgresql, clones the repo, applies `db/init.sql` + `db/seed.sql`) |
+| `20-backend-vm.yaml`    | Node.js backend `VirtualMachine` + `VirtualMachineService` + bootstrap `Secret` (cloud-init installs Node 20 from NodeSource, clones the repo, runs `npm install && npm run build`, then starts `node dist/index.js` under systemd) |
 | `30-frontend.yaml`      | Nginx frontend `Deployment` + `Service` (same `bank-frontend:latest` image as `k8s/`) |
 | `40-ingress.yaml`       | Optional `Ingress` at `bank-vm-h93q9.local` |
 
@@ -44,14 +46,16 @@ Replace each one with a value that exists in your Supervisor namespace:
 # Find a class (CPU/memory shape)
 kubectl -n bank-vm-h93q9 get vmclass
 
-# Find a Fedora 40 (or other cloud-init-capable Linux) image
+# Find an Ubuntu cloud image (these manifests target Ubuntu 22.04 / 24.04 noble)
 kubectl -n bank-vm-h93q9 get vmimage
 
 # Find a storage class associated with the namespace
 kubectl get storageclass
 ```
 
-The image needs Cloud-Init pre-installed (every modern Fedora / Ubuntu / Photon / AlmaLinux cloud image does). The `runcmd` block assumes a Fedora/RHEL-family layout (`dnf`, `/var/lib/pgsql`, `postgresql-setup`); on Ubuntu/Debian images you would need to adjust the `runcmd` and package names.
+The `runcmd` blocks use **Ubuntu/Debian** conventions (`apt`, `/etc/postgresql/<ver>/main`, NodeSource setup script). To target a Fedora/RHEL image you'd need to swap the package names and config paths.
+
+The VMs need outbound internet to reach `github.com`, `archive.ubuntu.com`, `deb.nodesource.com`, and `registry.npmjs.org` during bootstrap.
 
 ## Build the frontend image
 
@@ -77,11 +81,16 @@ kubectl -n bank-vm-h93q9 describe vm postgres
 kubectl -n bank-vm-h93q9 describe vm backend
 ```
 
-First boot is slow — the OS image clone runs, then cloud-init installs packages and seeds the DB. Expect a few minutes before the API is reachable. Re-check readiness:
+First boot is slow — the OS image clone runs, then cloud-init installs packages, clones the repo, and either seeds the DB or builds the backend. Expect a few minutes before the API is reachable. Tail progress on the VM with the web console (see below) and watch `/var/log/cloud-init-output.log`.
+
+When the backend is up, validate it via:
 
 ```powershell
 kubectl -n bank-vm-h93q9 exec deploy/frontend -- wget -qO- http://backend:4000/api/health
+kubectl -n bank-vm-h93q9 exec deploy/frontend -- wget -qO- http://backend:4000/api/accounts
 ```
+
+> **Note:** the backend has no route registered for `/`. Hitting `http://<backend-vm-ip>:4000/` returns `Cannot GET /` from Express — that's expected, not a bug. Test against `/api/health` or `/api/accounts`.
 
 ## Access the app
 
@@ -120,9 +129,10 @@ kubectl -n bank-vm-h93q9 patch vm postgres --type=merge -p '{"spec":{"nextRestar
 
 ## Notes & limitations
 
-- **Bootstrap on every fresh VM.** cloud-init only runs once per instance — it does not re-run on a normal power cycle of the *same* VM. To re-seed the database from scratch, delete and recreate the VM (or its underlying disk), not just power-cycle it.
+- **Source of truth is the git repo.** Bootstrap clones `https://github.com/prydin/bank-sample-app.git`. If you fork or move the repo, update the `git clone ...` URL in both `10-postgres-vm.yaml` and `20-backend-vm.yaml`. Re-run is only triggered on a *fresh* VM (cloud-init runs once per instance), so to pick up new commits you must delete and recreate the VM.
+- **`Cannot GET /` is not an error.** The backend only serves `/api/*` routes. Use `/api/health` or `/api/accounts` to test.
 - **Storage.** The OS disk is provisioned from the chosen `VirtualMachineImage` and `StorageClass`. The database lives on that disk. For real persistence across redeploys, attach a PVC under `spec.volumes` and point `PGDATA` at it.
-- **First boot is slow.** `dnf` runs at first boot to install Postgres / Node. For production you'd bake a custom image with everything pre-installed.
+- **First boot is slow.** `apt` and `npm install` run at first boot. For production you'd bake a custom image with everything pre-installed and skip the cloud-init `runcmd`.
 - **DNS & networking.** A `VirtualMachineService` creates a backing Kubernetes `Service` + `Endpoints`, so the VMs are reachable from pods (and from each other) at `postgres.bank-vm-h93q9.svc.cluster.local` and `backend.bank-vm-h93q9.svc.cluster.local`, just like normal pod services.
 - **API version.** Manifests use `vmoperator.vmware.com/v1alpha5`. Earlier vSphere releases ship `v1alpha2`/`v1alpha3`/`v1alpha4`; the schema used here (`spec.className`, `spec.imageName`, `spec.storageClass`, `spec.bootstrap.cloudInit.rawCloudConfig`, `spec.powerState`) is compatible with all of them — only the `apiVersion:` line needs to change.
 - **Frontend stays a pod** — only the backend and database were moved to VMs as requested.
