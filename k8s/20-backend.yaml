@@ -1,0 +1,66 @@
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+    name: backend
+    namespace: bank
+    labels:
+        app: backend
+spec:
+    replicas: 1
+    selector:
+        matchLabels:
+            app: backend
+    template:
+        metadata:
+            labels:
+                app: backend
+        spec:
+            containers:
+                - name: backend
+                  image: bank-backend:latest
+                  imagePullPolicy: IfNotPresent
+                  ports:
+                      - containerPort: 4000
+                  env:
+                      - name: PORT
+                        value: "4000"
+                      - name: CORS_ORIGIN
+                        value: "*"
+                      - name: DATABASE_URL
+                        valueFrom:
+                            secretKeyRef:
+                                name: postgres-credentials
+                                key: DATABASE_URL
+                  readinessProbe:
+                      httpGet:
+                          path: /api/health
+                          port: 4000
+                      initialDelaySeconds: 3
+                      periodSeconds: 5
+                  livenessProbe:
+                      httpGet:
+                          path: /api/health
+                          port: 4000
+                      initialDelaySeconds: 15
+                      periodSeconds: 20
+                  resources:
+                      requests:
+                          cpu: 50m
+                          memory: 64Mi
+                      limits:
+                          cpu: 250m
+                          memory: 256Mi
+---
+apiVersion: v1
+kind: Service
+metadata:
+    name: backend
+    namespace: bank
+spec:
+    type: ClusterIP
+    selector:
+        app: backend
+    ports:
+        - port: 4000
+          targetPort: 4000
+          name: http

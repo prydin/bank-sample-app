@@ -1,0 +1,147 @@
+# Postgres running inside a KubeVirt VM (Fedora cloud image).
+# cloud-init installs postgresql-server, applies schema + seed, and opens
+# the listener on the pod network. Data lives on the ephemeral container
+# disk -- on VM restart, cloud-init runs again and re-seeds.
+
+apiVersion: v1
+kind: Service
+metadata:
+    name: postgres
+    namespace: bank-vm
+spec:
+    type: ClusterIP
+    selector:
+        app: postgres
+    ports:
+        - port: 5432
+          targetPort: 5432
+          name: postgres
+---
+apiVersion: kubevirt.io/v1
+kind: VirtualMachine
+metadata:
+    name: postgres
+    namespace: bank-vm
+spec:
+    runStrategy: Always
+    template:
+        metadata:
+            labels:
+                app: postgres
+                kubevirt.io/vm: postgres
+        spec:
+            domain:
+                cpu:
+                    cores: 1
+                memory:
+                    guest: 1Gi
+                devices:
+                    disks:
+                        - name: containerdisk
+                          disk:
+                              bus: virtio
+                        - name: cloudinitdisk
+                          disk:
+                              bus: virtio
+                    interfaces:
+                        - name: default
+                          masquerade: {}
+                    rng: {}
+            networks:
+                - name: default
+                  pod: {}
+            terminationGracePeriodSeconds: 30
+            volumes:
+                - name: containerdisk
+                  containerDisk:
+                      image: quay.io/containerdisks/fedora:40
+                - name: cloudinitdisk
+                  cloudInitNoCloud:
+                      userData: |
+                          #cloud-config
+                          hostname: bank-postgres
+                          package_update: true
+                          packages:
+                            - postgresql-server
+                            - postgresql-contrib
+                          write_files:
+                            - path: /var/lib/pgsql/sql/01-init.sql
+                              owner: postgres:postgres
+                              permissions: '0644'
+                              content: |
+                                CREATE TABLE IF NOT EXISTS accounts (
+                                    id              SERIAL PRIMARY KEY,
+                                    name            TEXT        NOT NULL,
+                                    type            TEXT        NOT NULL CHECK (type IN ('checking', 'savings', 'credit')),
+                                    account_number  TEXT        NOT NULL UNIQUE,
+                                    balance_cents   BIGINT      NOT NULL DEFAULT 0,
+                                    currency        CHAR(3)     NOT NULL DEFAULT 'USD',
+                                    opened_at       TIMESTAMPTZ NOT NULL DEFAULT NOW()
+                                );
+                                CREATE TABLE IF NOT EXISTS transactions (
+                                    id           SERIAL PRIMARY KEY,
+                                    account_id   INTEGER     NOT NULL REFERENCES accounts(id) ON DELETE CASCADE,
+                                    posted_at    TIMESTAMPTZ NOT NULL,
+                                    description  TEXT        NOT NULL,
+                                    merchant     TEXT,
+                                    category     TEXT,
+                                    amount_cents BIGINT      NOT NULL
+                                );
+                                CREATE INDEX IF NOT EXISTS idx_transactions_account_posted
+                                    ON transactions (account_id, posted_at DESC);
+                            - path: /var/lib/pgsql/sql/02-seed.sql
+                              owner: postgres:postgres
+                              permissions: '0644'
+                              content: |
+                                INSERT INTO accounts (name, type, account_number, balance_cents, currency, opened_at) VALUES
+                                    ('Everyday Checking',    'checking', '100000001234',  528734, 'USD', '2021-03-14'),
+                                    ('High-Yield Savings',   'savings',  '200000005678', 1842500, 'USD', '2020-07-02'),
+                                    ('Vacation Fund',        'savings',  '200000009012',  312050, 'USD', '2023-01-18'),
+                                    ('Platinum Credit Card', 'credit',   '400000003456', -127845, 'USD', '2022-11-09');
+
+                                INSERT INTO transactions (account_id, posted_at, description, merchant, category, amount_cents) VALUES
+                                    (1, NOW() - INTERVAL '1 day',  'Direct deposit',        'Acme Corp Payroll',   'Income',     325000),
+                                    (1, NOW() - INTERVAL '2 days', 'Grocery purchase',      'Whole Foods Market',  'Groceries',  -8742),
+                                    (1, NOW() - INTERVAL '3 days', 'Coffee',                'Blue Bottle Coffee',  'Dining',     -625),
+                                    (1, NOW() - INTERVAL '4 days', 'Electric bill',         'ConEd',               'Utilities',  -11240),
+                                    (1, NOW() - INTERVAL '5 days', 'Transfer to Savings',   'Internal Transfer',   'Transfer',   -50000),
+                                    (1, NOW() - INTERVAL '6 days', 'Rideshare',             'Uber',                'Transport',  -1830),
+                                    (1, NOW() - INTERVAL '8 days', 'Restaurant',            'Joe''s Pizza',        'Dining',     -2450),
+                                    (1, NOW() - INTERVAL '10 days','Pharmacy',              'CVS',                 'Health',     -1875),
+                                    (1, NOW() - INTERVAL '12 days','Streaming subscription','Netflix',             'Entertainment', -1599),
+                                    (1, NOW() - INTERVAL '14 days','Rent payment',          'Greystar Properties', 'Housing',    -185000);
+
+                                INSERT INTO transactions (account_id, posted_at, description, merchant, category, amount_cents) VALUES
+                                    (2, NOW() - INTERVAL '1 day',  'Interest payment',      'Northwind Bank',      'Interest',   3812),
+                                    (2, NOW() - INTERVAL '5 days', 'Transfer from Checking','Internal Transfer',   'Transfer',   50000),
+                                    (2, NOW() - INTERVAL '20 days','Transfer from Checking','Internal Transfer',   'Transfer',   75000),
+                                    (2, NOW() - INTERVAL '32 days','Interest payment',      'Northwind Bank',      'Interest',   3650),
+                                    (2, NOW() - INTERVAL '50 days','Transfer from Checking','Internal Transfer',   'Transfer',  100000);
+
+                                INSERT INTO transactions (account_id, posted_at, description, merchant, category, amount_cents) VALUES
+                                    (3, NOW() - INTERVAL '2 days', 'Monthly contribution',  'Internal Transfer',   'Transfer',   25000),
+                                    (3, NOW() - INTERVAL '33 days','Monthly contribution',  'Internal Transfer',   'Transfer',   25000),
+                                    (3, NOW() - INTERVAL '64 days','Monthly contribution',  'Internal Transfer',   'Transfer',   25000),
+                                    (3, NOW() - INTERVAL '95 days','Initial deposit',       'Internal Transfer',   'Transfer',  100000);
+
+                                INSERT INTO transactions (account_id, posted_at, description, merchant, category, amount_cents) VALUES
+                                    (4, NOW() - INTERVAL '1 day',  'Online purchase',       'Amazon',              'Shopping',   -6499),
+                                    (4, NOW() - INTERVAL '2 days', 'Gas station',           'Shell',               'Transport',  -5230),
+                                    (4, NOW() - INTERVAL '3 days', 'Restaurant',            'The Cheesecake Factory','Dining',   -8745),
+                                    (4, NOW() - INTERVAL '5 days', 'Airline ticket',        'Delta Airlines',      'Travel',    -42800),
+                                    (4, NOW() - INTERVAL '9 days', 'Hotel booking',         'Marriott',            'Travel',    -31500),
+                                    (4, NOW() - INTERVAL '12 days','Statement payment',     'Payment - Thank You', 'Payment',    150000),
+                                    (4, NOW() - INTERVAL '15 days','Electronics',           'Best Buy',            'Shopping',   -24999),
+                                    (4, NOW() - INTERVAL '20 days','Subscription',          'Spotify',             'Entertainment', -999);
+                          runcmd:
+                            - postgresql-setup --initdb
+                            - sed -i "s/^#listen_addresses.*/listen_addresses = '*'/" /var/lib/pgsql/data/postgresql.conf
+                            - sed -i "s/^port.*/port = 5432/" /var/lib/pgsql/data/postgresql.conf
+                            - echo "host all all 0.0.0.0/0 md5" >> /var/lib/pgsql/data/pg_hba.conf
+                            - systemctl enable --now postgresql
+                            - sudo -u postgres psql -c "CREATE USER bank WITH PASSWORD 'bank';"
+                            - sudo -u postgres psql -c "CREATE DATABASE bankdb OWNER bank;"
+                            - sudo -u postgres psql -d bankdb -f /var/lib/pgsql/sql/01-init.sql
+                            - sudo -u postgres psql -d bankdb -f /var/lib/pgsql/sql/02-seed.sql
+                            - sudo -u postgres psql -d bankdb -c "GRANT ALL ON ALL TABLES IN SCHEMA public TO bank;"
+                            - sudo -u postgres psql -d bankdb -c "GRANT ALL ON ALL SEQUENCES IN SCHEMA public TO bank;"

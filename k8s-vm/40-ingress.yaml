@@ -1,0 +1,22 @@
+# Optional Ingress, same idea as the pod-only variant.
+# Requires an ingress controller (e.g. ingress-nginx) in the cluster.
+apiVersion: networking.k8s.io/v1
+kind: Ingress
+metadata:
+    name: bank
+    namespace: bank-vm
+    annotations:
+        nginx.ingress.kubernetes.io/rewrite-target: /
+spec:
+    ingressClassName: nginx
+    rules:
+        - host: bank-vm.local
+          http:
+              paths:
+                  - path: /
+                    pathType: Prefix
+                    backend:
+                        service:
+                            name: frontend
+                            port:
+                                number: 80
