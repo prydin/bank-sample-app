@@ -19,7 +19,7 @@
 #   1. kubectl apply -f k8s-vm/00-namespace.yaml -f k8s-vm/05-dns.yaml
 #   2. kubectl -n bank-vm-h93q9 get svc dns-lb \
 #        -o jsonpath='{.status.loadBalancer.ingress[0].ip}'
-#   3. Replace the string __DNS_LB_IP__ in 10-postgres-vm.yaml,
+#   3. Replace the string 10.1.9.11 in 10-postgres-vm.yaml,
 #      20-backend-vm.yaml, and 30-frontend.yaml with that value, and commit.
 #   4. kubectl apply -f k8s-vm/
 #
