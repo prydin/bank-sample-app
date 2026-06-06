@@ -2,22 +2,11 @@
 # cloud-init installs the distro `postgresql` package, clones the project to
 # get the canonical db/init.sql + db/seed.sql, and applies them. Bootstrap
 # only runs on first boot of a fresh VM (delete + recreate to re-seed).
+#
+# The backend VM reaches this database by hostname via the bind9 DNS server
+# (see 05-dns.yaml). No `VirtualMachineService` is needed -- the app VMs talk
+# directly to each other on the workload network.
 
-apiVersion: vmoperator.vmware.com/v1alpha5
-kind: VirtualMachineService
-metadata:
-    name: postgres
-    namespace: bank-vm-h93q9
-spec:
-    type: ClusterIP
-    selector:
-        app: postgres
-    ports:
-        - name: postgres
-          protocol: TCP
-          port: 5432
-          targetPort: 5432
----
 apiVersion: v1
 kind: Secret
 metadata:

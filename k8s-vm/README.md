@@ -42,11 +42,10 @@ kubectl get storageclass
 |------|---------|
 | `00-namespace.yaml`     | `bank-vm-h93q9` namespace |
 | `05-dns.yaml`           | bind9 `Deployment` + `Service` (`dns-lb`, `LoadBalancer`) serving the `bank.local` zone, plus the TSIG key in a `ConfigMap`. App VMs self-register here at boot. See [Internal DNS](#internal-dns). |
-| `10-postgres-vm.yaml`   | Postgres `VirtualMachine` + `VirtualMachineService` + bootstrap `Secret` (cloud-init `apt install`s postgresql, clones the repo, applies `db/init.sql` + `db/seed.sql`) |
-| `20-backend-vm.yaml`    | Node.js backend `VirtualMachine` + `VirtualMachineService` + bootstrap `Secret` (cloud-init installs Node 20 from NodeSource, clones the repo, runs `npm install && npm run build`, then starts `node dist/index.js` under systemd) |
-| `30-frontend.yaml`      | nginx frontend `VirtualMachine` + `VirtualMachineService` + bootstrap `Secret` (cloud-init installs Node 20 + nginx, clones the repo, runs `npm run build`, copies the `dist/` output into `/usr/share/nginx/html`, and installs `frontend/nginx.conf` which reverse-proxies `/api/` to `backend:4000`) |
-| `40-ingress.yaml`       | Optional `Ingress` at `bank-vm-h93q9.local` (routes `/` to the `frontend` Service) |
-| `50-loadbalancer.yaml`  | User-facing `VirtualMachineService` of type `LoadBalancer` (`frontend-lb`) that selects the frontend VM on port 80 (HTTP) and 22 (SSH) |
+| `10-postgres-vm.yaml`   | Postgres `VirtualMachine` + bootstrap `Secret` (cloud-init `apt install`s postgresql, clones the repo, applies `db/init.sql` + `db/seed.sql`) |
+| `20-backend-vm.yaml`    | Node.js backend `VirtualMachine` + bootstrap `Secret` (cloud-init installs Node 20 from NodeSource, clones the repo, runs `npm install && npm run build`, then starts `node dist/index.js` under systemd) |
+| `30-frontend.yaml`      | nginx frontend `VirtualMachine` + bootstrap `Secret` + the user-facing `frontend-lb` `VirtualMachineService` of type `LoadBalancer` (ports 80/22). cloud-init installs Node 20 + nginx, clones the repo, runs `npm run build`, copies the `dist/` output into `/usr/share/nginx/html`, and installs `frontend/nginx.conf` which reverse-proxies `/api/` to `backend:4000`. |
+| `40-ingress.yaml`       | Optional `Ingress` at `bank-vm-h93q9.local` (routes `/` to the `frontend-lb` Service) |
 
 ## Pick a class, image, and storage class
 
@@ -135,27 +134,7 @@ kubectl -n bank-vm-h93q9 get vm backend -o jsonpath='{.status.network.primaryIP4
 #   curl http://<that-ip>:4000/api/accounts
 ```
 
-Watch the VMs come up:
-
-```powershell
-kubectl -n bank-vm-h93q9 get vm,vmservice
-kubectl -n bank-vm-h93q9 describe vm postgres
-kubectl -n bank-vm-h93q9 describe vm backend
-kubectl -n bank-vm-h93q9 describe vm frontend
-```
-
-First boot is slow — the OS image clone runs, then cloud-init installs packages, clones the repo, and either seeds the DB, builds the backend, or builds the SPA. Expect a few minutes before the app is reachable. Tail progress on a VM via the web console (see below) and watch `/var/log/cloud-init-output.log`.
-
-When the backend is up, validate it via the backend LoadBalancer VIP from any host that can reach the workload network:
-
-```powershell
-$backendVip = kubectl -n bank-vm-h93q9 get vmservice backend-lb -o jsonpath='{.status.loadBalancer.ingress[0].ip}'
-# Then:
-#   curl http://$backendVip:4000/api/health
-#   curl http://$backendVip:4000/api/accounts
-```
-
-> **Note:** the backend has no route registered for `/`. Hitting `http://<backend-vm-ip>:4000/` returns `Cannot GET /` from Express — that's expected, not a bug. Test against `/api/health` or `/api/accounts`. The user-facing entry point is the frontend, served on port 80 via the `frontend-lb` LoadBalancer.
+> **Note:** the backend has no route registered for `/`. Hitting `http://<backend-vm-ip>:4000/` returns `Cannot GET /` from Express -- that's expected, not a bug. Test against `/api/health` or `/api/accounts`. The user-facing entry point is the frontend, served on port 80 via the `frontend-lb` LoadBalancer.
 
 ## Access the app
 
@@ -170,7 +149,7 @@ Open `http://<EXTERNAL-IP>/` in a browser. The nginx VM serves the React SPA at 
 If no LoadBalancer provider is available, port-forward instead:
 
 ```powershell
-kubectl -n bank-vm-h93q9 port-forward svc/frontend 8080:80
+kubectl -n bank-vm-h93q9 port-forward svc/frontend-lb 8080:80
 ```
 
 and open http://localhost:8080.

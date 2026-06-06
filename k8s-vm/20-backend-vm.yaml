@@ -1,24 +1,11 @@
 # Backend running inside a VMware VM Operator VirtualMachine (Ubuntu cloud image).
 # cloud-init installs Node.js 20 (NodeSource), clones this repo, builds the
 # real TypeScript backend with `npm run build`, and runs it under systemd.
-# The VM is selected by the `backend` VirtualMachineService via labels on
-# the VirtualMachine itself.
+#
+# The frontend VM reaches this backend by hostname via the bind9 DNS server
+# (see 05-dns.yaml). No `VirtualMachineService` is needed -- the app VMs talk
+# directly to each other on the workload network.
 
-apiVersion: vmoperator.vmware.com/v1alpha5
-kind: VirtualMachineService
-metadata:
-    name: backend
-    namespace: bank-vm-h93q9
-spec:
-    type: ClusterIP
-    selector:
-        app: backend
-    ports:
-        - name: http
-          protocol: TCP
-          port: 4000
-          targetPort: 4000
----
 apiVersion: v1
 kind: Secret
 metadata:
