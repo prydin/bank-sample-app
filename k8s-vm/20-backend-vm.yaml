@@ -28,7 +28,7 @@ type: Opaque
 stringData:
     user-data: |
         #cloud-config
-        hostname: bank-backend
+        hostname: backend
         users:
           - name: ubuntu
             sudo: ALL=(ALL) NOPASSWD:ALL
@@ -42,7 +42,36 @@ stringData:
           - ca-certificates
           - curl
           - git
+          - bind9-dnsutils
         write_files:
+          - path: /etc/bank/tsig.key
+            permissions: '0600'
+            content: |
+              key "update-key" {
+                  algorithm hmac-sha256;
+                  secret "C5oOXzv1cN3Sd5VYx7uH+TpKQB8K5J0jSqQ5kPdJfFY=";
+              };
+          - path: /etc/systemd/resolved.conf.d/bank.conf
+            permissions: '0644'
+            content: |
+              [Resolve]
+              DNS=__DNS_LB_IP__
+              Domains=bank.local
+              FallbackDNS=10.1.1.1 8.8.8.8
+          - path: /usr/local/sbin/bank-register-dns.sh
+            permissions: '0755'
+            content: |
+              #!/bin/sh
+              set -e
+              MYIP=$(hostname -I | awk '{print $1}')
+              HOST=$(hostname -s)
+              nsupdate -k /etc/bank/tsig.key <<EOF
+              server __DNS_LB_IP__
+              zone bank.local.
+              update delete $HOST.bank.local. A
+              update add $HOST.bank.local. 60 A $MYIP
+              send
+              EOF
           - path: /etc/systemd/system/bank-backend.service
             permissions: '0644'
             content: |
@@ -64,10 +93,8 @@ stringData:
               [Install]
               WantedBy=multi-user.target
         runcmd:
-          # Map the upstream name `postgres` (used in the backend's DATABASE_URL)
-          # to the postgres VM's static IP. Workload DNS does not know K8s
-          # Service names or VM hostnames, so we use a static /etc/hosts entry.
-          - echo "172.16.203.73 postgres" >> /etc/hosts
+          - systemctl restart systemd-resolved
+          - /usr/local/sbin/bank-register-dns.sh
           - bash -lc "curl -fsSL https://deb.nodesource.com/setup_20.x | bash -"
           - apt-get install -y nodejs
           - git clone https://github.com/prydin/bank-sample-app.git /opt/bank-app
@@ -91,16 +118,7 @@ spec:
     storageClass: vsan-default-storage-policy
     powerState: PoweredOn
     network:
-        hostName: bank-backend
-        # Static IP on the workload network. Adjust prefix/gateway/nameservers
-        # if your environment differs.
-        interfaces:
-            - name: eth0
-              addresses:
-                  - 172.16.203.72/24
-              gateway4: 172.16.203.1
-              nameservers:
-                  - 10.1.1.1
+        hostName: backend
     bootstrap:
         cloudInit:
             rawCloudConfig:

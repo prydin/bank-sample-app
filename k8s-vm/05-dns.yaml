@@ -1,0 +1,134 @@
+# Internal DNS for the application VMs.
+#
+# bind9 runs as a Pod, exposed via a LoadBalancer Service so the app VMs
+# (which can't reach K8s ClusterIPs from the workload network) get a stable
+# external VIP to point at.
+#
+# Each app VM at first boot:
+#   1. Writes /etc/systemd/resolved.conf.d/bank.conf pointing systemd-resolved
+#      at this LB VIP, with `bank.local` as a search domain.
+#   2. Runs `nsupdate` (TSIG-signed with the key below) to insert its own A
+#      record into the `bank.local` zone.
+#
+# That way, `backend`, `postgres`, `frontend` resolve to the current VM IPs
+# from any app VM, without anything baked into git -- except the LB VIP itself,
+# which is committed once after the one-time setup below and never changes for
+# the lifetime of the `dns-lb` Service.
+#
+# ONE-TIME SETUP (do this before first applying 10/20/30):
+#   1. kubectl apply -f k8s-vm/00-namespace.yaml -f k8s-vm/05-dns.yaml
+#   2. kubectl -n bank-vm-h93q9 get svc dns-lb \
+#        -o jsonpath='{.status.loadBalancer.ingress[0].ip}'
+#   3. Replace the string __DNS_LB_IP__ in 10-postgres-vm.yaml,
+#      20-backend-vm.yaml, and 30-frontend.yaml with that value, and commit.
+#   4. kubectl apply -f k8s-vm/
+#
+# The TSIG key below is a demo placeholder -- rotate for any non-demo use.
+---
+apiVersion: v1
+kind: ConfigMap
+metadata:
+    name: bind9-config
+    namespace: bank-vm-h93q9
+data:
+    named.conf: |
+        options {
+            directory "/var/cache/bind";
+            listen-on { any; };
+            listen-on-v6 { none; };
+            allow-query { any; };
+            recursion yes;
+            allow-recursion { any; };
+            forwarders { 10.1.1.1; 8.8.8.8; };
+            dnssec-validation no;
+        };
+
+        key "update-key" {
+            algorithm hmac-sha256;
+            secret "C5oOXzv1cN3Sd5VYx7uH+TpKQB8K5J0jSqQ5kPdJfFY=";
+        };
+
+        zone "bank.local" {
+            type master;
+            file "/var/lib/bind/db.bank.local";
+            allow-update { key "update-key"; };
+        };
+    db.bank.local: |
+        $TTL 60
+        @       IN      SOA     ns.bank.local. admin.bank.local. (
+                                1
+                                3600
+                                600
+                                86400
+                                60 )
+                IN      NS      ns.bank.local.
+        ns      IN      A       127.0.0.1
+---
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+    name: bind9
+    namespace: bank-vm-h93q9
+spec:
+    replicas: 1
+    strategy:
+        type: Recreate
+    selector:
+        matchLabels:
+            app: bind9
+    template:
+        metadata:
+            labels:
+                app: bind9
+        spec:
+            containers:
+                - name: bind9
+                  image: ubuntu/bind9:latest
+                  command:
+                      - sh
+                      - -c
+                      - |
+                          set -eux
+                          install -m 0644 /seed/named.conf /etc/bind/named.conf
+                          if [ ! -f /var/lib/bind/db.bank.local ]; then
+                              install -m 0644 /seed/db.bank.local /var/lib/bind/db.bank.local
+                          fi
+                          chown -R bind:bind /var/lib/bind /etc/bind/named.conf
+                          exec /usr/sbin/named -g -c /etc/bind/named.conf -u bind
+                  ports:
+                      - name: dns-udp
+                        containerPort: 53
+                        protocol: UDP
+                      - name: dns-tcp
+                        containerPort: 53
+                        protocol: TCP
+                  volumeMounts:
+                      - name: seed
+                        mountPath: /seed
+                      - name: zonedata
+                        mountPath: /var/lib/bind
+            volumes:
+                - name: seed
+                  configMap:
+                      name: bind9-config
+                - name: zonedata
+                  emptyDir: {}
+---
+apiVersion: v1
+kind: Service
+metadata:
+    name: dns-lb
+    namespace: bank-vm-h93q9
+spec:
+    type: LoadBalancer
+    selector:
+        app: bind9
+    ports:
+        - name: dns-udp
+          protocol: UDP
+          port: 53
+          targetPort: 53
+        - name: dns-tcp
+          protocol: TCP
+          port: 53
+          targetPort: 53

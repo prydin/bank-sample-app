@@ -27,7 +27,7 @@ type: Opaque
 stringData:
     user-data: |
         #cloud-config
-        hostname: bank-postgres
+        hostname: postgres
         users:
           - name: ubuntu
             sudo: ALL=(ALL) NOPASSWD:ALL
@@ -40,7 +40,39 @@ stringData:
         packages:
           - postgresql
           - git
+          - bind9-dnsutils
+        write_files:
+          - path: /etc/bank/tsig.key
+            permissions: '0600'
+            content: |
+              key "update-key" {
+                  algorithm hmac-sha256;
+                  secret "C5oOXzv1cN3Sd5VYx7uH+TpKQB8K5J0jSqQ5kPdJfFY=";
+              };
+          - path: /etc/systemd/resolved.conf.d/bank.conf
+            permissions: '0644'
+            content: |
+              [Resolve]
+              DNS=__DNS_LB_IP__
+              Domains=bank.local
+              FallbackDNS=10.1.1.1 8.8.8.8
+          - path: /usr/local/sbin/bank-register-dns.sh
+            permissions: '0755'
+            content: |
+              #!/bin/sh
+              set -e
+              MYIP=$(hostname -I | awk '{print $1}')
+              HOST=$(hostname -s)
+              nsupdate -k /etc/bank/tsig.key <<EOF
+              server __DNS_LB_IP__
+              zone bank.local.
+              update delete $HOST.bank.local. A
+              update add $HOST.bank.local. 60 A $MYIP
+              send
+              EOF
         runcmd:
+          - systemctl restart systemd-resolved
+          - /usr/local/sbin/bank-register-dns.sh
           - git clone https://github.com/prydin/bank-sample-app.git /opt/bank-app
           - |
             set -euo pipefail
@@ -74,16 +106,7 @@ spec:
 
     powerState: PoweredOn
     network:
-        hostName: bank-postgres
-        # Static IP on the workload network. Adjust prefix/gateway/nameservers
-        # if your environment differs.
-        interfaces:
-            - name: eth0
-              addresses:
-                  - 172.16.203.73/24
-              gateway4: 172.16.203.1
-              nameservers:
-                  - 10.1.1.1
+        hostName: postgres
     bootstrap:
         cloudInit:
             rawCloudConfig:

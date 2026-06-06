@@ -27,7 +27,7 @@ type: Opaque
 stringData:
     user-data: |
         #cloud-config
-        hostname: bank-frontend
+        hostname: frontend
         users:
           - name: ubuntu
             sudo: ALL=(ALL) NOPASSWD:ALL
@@ -42,11 +42,39 @@ stringData:
           - curl
           - git
           - nginx
+          - bind9-dnsutils
+        write_files:
+          - path: /etc/bank/tsig.key
+            permissions: '0600'
+            content: |
+              key "update-key" {
+                  algorithm hmac-sha256;
+                  secret "C5oOXzv1cN3Sd5VYx7uH+TpKQB8K5J0jSqQ5kPdJfFY=";
+              };
+          - path: /etc/systemd/resolved.conf.d/bank.conf
+            permissions: '0644'
+            content: |
+              [Resolve]
+              DNS=__DNS_LB_IP__
+              Domains=bank.local
+              FallbackDNS=10.1.1.1 8.8.8.8
+          - path: /usr/local/sbin/bank-register-dns.sh
+            permissions: '0755'
+            content: |
+              #!/bin/sh
+              set -e
+              MYIP=$(hostname -I | awk '{print $1}')
+              HOST=$(hostname -s)
+              nsupdate -k /etc/bank/tsig.key <<EOF
+              server __DNS_LB_IP__
+              zone bank.local.
+              update delete $HOST.bank.local. A
+              update add $HOST.bank.local. 60 A $MYIP
+              send
+              EOF
         runcmd:
-          # Map the upstream name `backend` (used in frontend/nginx.conf) to the
-          # backend VM's static IP. Workload DNS does not know K8s Service names
-          # or VM hostnames, so we use a static /etc/hosts entry.
-          - echo "172.16.203.72 backend" >> /etc/hosts
+          - systemctl restart systemd-resolved
+          - /usr/local/sbin/bank-register-dns.sh
           - bash -lc "curl -fsSL https://deb.nodesource.com/setup_20.x | bash -"
           - apt-get install -y nodejs
           - git clone https://github.com/prydin/bank-sample-app.git /opt/bank-app
@@ -55,6 +83,7 @@ stringData:
           - cp -r /opt/bank-app/frontend/dist /usr/share/nginx/html
           - rm -f /etc/nginx/sites-enabled/default
           - cp /opt/bank-app/frontend/nginx.conf /etc/nginx/conf.d/bank.conf
+          - bash -lc 'for i in $(seq 1 120); do getent hosts backend.bank.local >/dev/null 2>&1 && break; echo "waiting for backend.bank.local..."; sleep 5; done'
           - nginx -t
           - systemctl restart nginx
 ---
@@ -74,16 +103,7 @@ spec:
     storageClass: vsan-default-storage-policy
     powerState: PoweredOn
     network:
-        hostName: bank-frontend
-        # Static IP on the workload network. Adjust prefix/gateway/nameservers
-        # if your environment differs.
-        interfaces:
-            - name: eth0
-              addresses:
-                  - 172.16.203.71/24
-              gateway4: 172.16.203.1
-              nameservers:
-                  - 10.1.1.1
+        hostName: frontend
     bootstrap:
         cloudInit:
             rawCloudConfig:

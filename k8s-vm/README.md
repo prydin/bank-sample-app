@@ -1,38 +1,24 @@
 # Northwind Bank on VMware VM Operator VMs
 
-All three tiers — **frontend** (nginx), **backend** (Node.js), and **database** (Postgres) — run inside [VMware VM Operator](https://vm-operator.readthedocs.io/) `VirtualMachine`s (Ubuntu cloud image, bootstrapped via cloud-init). A `VirtualMachineService` of type `LoadBalancer` puts a public VIP in front of the frontend VM.
+All three tiers — **frontend** (nginx), **backend** (Node.js), and **database** (Postgres) — run inside [VMware VM Operator](https://vm-operator.readthedocs.io/) `VirtualMachine`s (Ubuntu cloud image, bootstrapped via cloud-init). A `VirtualMachineService` of type `LoadBalancer` puts a public VIP in front of the frontend VM. A small **bind9** Pod (also exposed via `LoadBalancer`) provides internal name resolution: each app VM self-registers its A record in `bank.local` at first boot, so `backend`, `postgres`, and `frontend` resolve from inside any VM — see [Internal DNS](#internal-dns) below.
 
 The VMs do not carry an inlined copy of the app source. cloud-init `git clone`s this repository into each guest and runs the real `db/init.sql` + `db/seed.sql` (Postgres VM), builds the real TypeScript backend with `npm run build` (backend VM), or builds the React SPA with `npm run build` and serves it with nginx (frontend VM).
 
-## Static IPs and name resolution
+## Internal DNS
 
-The VMs sit on a vSphere workload network whose DNS server (`10.1.1.1` in this lab) does not know K8s `Service` names or VM hostnames. To make tier-to-tier communication reliable, each VM has a **static IP** and each VM that needs to call another tier writes a small `/etc/hosts` entry in cloud-init.
+The vSphere workload network's DNS doesn't know K8s `Service` names or VM hostnames, so `backend` and `postgres` won't resolve out of the box. [05-dns.yaml](05-dns.yaml) deploys a minimal **bind9** as a Pod with a `LoadBalancer` `Service` (`dns-lb`), authoritative for the `bank.local` zone and accepting TSIG-signed `nsupdate`s.
 
-| Role     | Static IP        | Hostname        |
-|----------|------------------|-----------------|
-| frontend | `172.16.203.71`  | `bank-frontend` |
-| backend  | `172.16.203.72`  | `bank-backend`  |
-| postgres | `172.16.203.73`  | `bank-postgres` |
+Each app VM cloud-init:
 
-Assumptions baked into the manifests (change in [10-postgres-vm.yaml](10-postgres-vm.yaml), [20-backend-vm.yaml](20-backend-vm.yaml), [30-frontend.yaml](30-frontend.yaml) if your network differs):
+- writes `/etc/systemd/resolved.conf.d/bank.conf` pointing systemd-resolved at the `dns-lb` VIP, with `bank.local` as a search domain;
+- writes `/etc/bank/tsig.key` (the TSIG key shared with bind9);
+- runs `nsupdate` once at first boot to insert its own A record `<hostname>.bank.local. -> <its DHCP IP>`.
 
-- subnet prefix `/24`
-- gateway `172.16.203.1`
-- nameserver `10.1.1.1`
+With the search domain in effect, the backend's `DATABASE_URL=postgres://...@postgres:5432/...` and the frontend's `proxy_pass http://backend:4000;` resolve unchanged — `frontend/nginx.conf` is not modified.
 
-Verify against an existing VM with `ip a`, `ip route`, and `resolvectl status`. The static-IP block lives under `spec.network.interfaces[0]` in each `VirtualMachine` and looks like:
+The only piece that has to be known up front is the `dns-lb` VIP. It's allocated by the LoadBalancer provider on first apply, is stable for the lifetime of the `Service`, and is then committed once into the three app VM YAMLs in place of the `__DNS_LB_IP__` placeholder. See [Deploy](#deploy).
 
-```yaml
-network:
-  hostName: bank-frontend
-  interfaces:
-    - name: eth0
-      addresses: ["172.16.203.71/24"]
-      gateway4: 172.16.203.1
-      nameservers: ["10.1.1.1"]
-```
-
-The frontend VM's cloud-init appends `172.16.203.72 backend` to `/etc/hosts` so `frontend/nginx.conf`'s `proxy_pass http://backend:4000;` resolves. The backend VM's cloud-init appends `172.16.203.73 postgres` so the backend's `DATABASE_URL=postgres://bank:bank@postgres:5432/bankdb` resolves. If you change a VM's IP, update both the static-IP block on that VM **and** the matching `/etc/hosts` entry on the VM that calls it.
+The TSIG key inlined in [05-dns.yaml](05-dns.yaml) (and in each app VM's `write_files`) is a demo placeholder — rotate it for any non-demo use.
 
 ## Prerequisites
 
@@ -55,6 +41,7 @@ kubectl get storageclass
 | File | Purpose |
 |------|---------|
 | `00-namespace.yaml`     | `bank-vm-h93q9` namespace |
+| `05-dns.yaml`           | bind9 `Deployment` + `Service` (`dns-lb`, `LoadBalancer`) serving the `bank.local` zone, plus the TSIG key in a `ConfigMap`. App VMs self-register here at boot. See [Internal DNS](#internal-dns). |
 | `10-postgres-vm.yaml`   | Postgres `VirtualMachine` + `VirtualMachineService` + bootstrap `Secret` (cloud-init `apt install`s postgresql, clones the repo, applies `db/init.sql` + `db/seed.sql`) |
 | `20-backend-vm.yaml`    | Node.js backend `VirtualMachine` + `VirtualMachineService` + bootstrap `Secret` (cloud-init installs Node 20 from NodeSource, clones the repo, runs `npm install && npm run build`, then starts `node dist/index.js` under systemd) |
 | `30-frontend.yaml`      | nginx frontend `VirtualMachine` + `VirtualMachineService` + bootstrap `Secret` (cloud-init installs Node 20 + nginx, clones the repo, runs `npm run build`, copies the `dist/` output into `/usr/share/nginx/html`, and installs `frontend/nginx.conf` which reverse-proxies `/api/` to `backend:4000`) |
@@ -91,8 +78,61 @@ The VMs need outbound internet to reach `github.com`, `archive.ubuntu.com`, `deb
 
 ## Deploy
 
+First-time setup is a two-step affair: bring up bind9, learn its LoadBalancer VIP, commit that VIP into the three VM manifests, then apply the rest. Subsequent re-deploys are a single `kubectl apply -f k8s-vm/`.
+
+### One-time DNS bootstrap
+
+```powershell
+kubectl apply -f k8s-vm/00-namespace.yaml -f k8s-vm/05-dns.yaml
+
+# Wait for the LoadBalancer to allocate a VIP, then read it:
+kubectl -n bank-vm-h93q9 get svc dns-lb `
+    -o jsonpath='{.status.loadBalancer.ingress[0].ip}'
+```
+
+Replace every occurrence of the literal string `__DNS_LB_IP__` in [10-postgres-vm.yaml](10-postgres-vm.yaml), [20-backend-vm.yaml](20-backend-vm.yaml), and [30-frontend.yaml](30-frontend.yaml) with that VIP, and commit. PowerShell one-liner if you like:
+
+```powershell
+$vip = kubectl -n bank-vm-h93q9 get svc dns-lb -o jsonpath='{.status.loadBalancer.ingress[0].ip}'
+Get-ChildItem k8s-vm/10-postgres-vm.yaml,k8s-vm/20-backend-vm.yaml,k8s-vm/30-frontend.yaml |
+    ForEach-Object {
+        (Get-Content -Raw $_.FullName) -replace '__DNS_LB_IP__', $vip |
+            Set-Content -NoNewline $_.FullName
+    }
+```
+
+### Apply the rest
+
 ```powershell
 kubectl apply -f k8s-vm/
+```
+
+Watch the VMs come up:
+
+```powershell
+kubectl -n bank-vm-h93q9 get vm,vmservice,deploy,svc
+kubectl -n bank-vm-h93q9 describe vm postgres
+kubectl -n bank-vm-h93q9 describe vm backend
+kubectl -n bank-vm-h93q9 describe vm frontend
+```
+
+First boot is slow — the OS image clone runs, then cloud-init installs packages, clones the repo, and either seeds the DB, builds the backend, or builds the SPA. Expect a few minutes before the app is reachable. Tail progress on a VM via the web console (see below) and watch `/var/log/cloud-init-output.log`.
+
+You can confirm DNS self-registration is working from inside any app VM or from the bind9 Pod:
+
+```powershell
+kubectl -n bank-vm-h93q9 exec deploy/bind9 -- dig @127.0.0.1 +short postgres.bank.local
+kubectl -n bank-vm-h93q9 exec deploy/bind9 -- dig @127.0.0.1 +short backend.bank.local
+kubectl -n bank-vm-h93q9 exec deploy/bind9 -- dig @127.0.0.1 +short frontend.bank.local
+```
+
+When the backend is up, validate it from any host that can reach the workload network:
+
+```powershell
+kubectl -n bank-vm-h93q9 get vm backend -o jsonpath='{.status.network.primaryIP4}{"\n"}'
+# Then:
+#   curl http://<that-ip>:4000/api/health
+#   curl http://<that-ip>:4000/api/accounts
 ```
 
 Watch the VMs come up:
@@ -106,13 +146,13 @@ kubectl -n bank-vm-h93q9 describe vm frontend
 
 First boot is slow — the OS image clone runs, then cloud-init installs packages, clones the repo, and either seeds the DB, builds the backend, or builds the SPA. Expect a few minutes before the app is reachable. Tail progress on a VM via the web console (see below) and watch `/var/log/cloud-init-output.log`.
 
-When the backend is up, validate it via the frontend VM:
+When the backend is up, validate it via the backend LoadBalancer VIP from any host that can reach the workload network:
 
 ```powershell
-kubectl -n bank-vm-h93q9 get vmservice
-# Then from any host that can reach the workload network:
-#   curl http://172.16.203.72:4000/api/health
-#   curl http://172.16.203.72:4000/api/accounts
+$backendVip = kubectl -n bank-vm-h93q9 get vmservice backend-lb -o jsonpath='{.status.loadBalancer.ingress[0].ip}'
+# Then:
+#   curl http://$backendVip:4000/api/health
+#   curl http://$backendVip:4000/api/accounts
 ```
 
 > **Note:** the backend has no route registered for `/`. Hitting `http://<backend-vm-ip>:4000/` returns `Cannot GET /` from Express — that's expected, not a bug. Test against `/api/health` or `/api/accounts`. The user-facing entry point is the frontend, served on port 80 via the `frontend-lb` LoadBalancer.
@@ -168,5 +208,5 @@ kubectl -n bank-vm-h93q9 patch vm postgres --type=merge -p '{"spec":{"nextRestar
 - **`Cannot GET /` on the backend is not an error.** The backend only serves `/api/*` routes. The user-facing UI lives on the frontend VM (port 80) — reach it via the `frontend-lb` LoadBalancer.
 - **Storage.** The OS disk is provisioned from the chosen `VirtualMachineImage` and `StorageClass`. The database lives on that disk. For real persistence across redeploys, attach a PVC under `spec.volumes` and point `PGDATA` at it.
 - **First boot is slow.** `apt` and `npm install` run at first boot. For production you'd bake a custom image with everything pre-installed and skip the cloud-init `runcmd`.
-- **DNS & networking.** Workload DNS does not know K8s `Service` names or VM hostnames, so tier-to-tier traffic goes by static IP via `/etc/hosts` (see the *Static IPs and name resolution* section above). The `VirtualMachineService` resources still produce backing `Service`s, but those `ClusterIP`s are not routable from the workload network.
-- **API version.** Manifests use `vmoperator.vmware.com/v1alpha5`. Earlier vSphere releases ship `v1alpha2`/`v1alpha3`/`v1alpha4`; the schema used here (`spec.className`, `spec.imageName`, `spec.storageClass`, `spec.bootstrap.cloudInit.rawCloudConfig`, `spec.powerState`, `spec.network.interfaces`) is compatible with `v1alpha3`+ — only the `apiVersion:` line needs to change for those.
+- **DNS & name resolution.** Handled by the bind9 `dns-lb` Pod plus per-VM `nsupdate` self-registration — see [Internal DNS](#internal-dns). The bind9 Pod uses an `emptyDir` for its zone file, so a Pod restart loses all registrations; each app VM only re-registers on a *fresh* cloud-init boot, so after a bind9 Pod restart you should `kubectl patch vm` (or otherwise reboot) the app VMs to re-register them. For a demo this is fine.
+- **API version.** Manifests use `vmoperator.vmware.com/v1alpha5`. Earlier vSphere releases ship `v1alpha2`/`v1alpha3`/`v1alpha4`; the schema used here (`spec.className`, `spec.imageName`, `spec.storageClass`, `spec.bootstrap.cloudInit.rawCloudConfig`, `spec.powerState`) is compatible with all of them — only the `apiVersion:` line needs to change.
