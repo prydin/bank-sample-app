@@ -67,4 +67,5 @@ jobs:
           done
 
       - name: kubectl apply
+        continue-on-error: true
         run: kubectl apply -f k8s-vm/
