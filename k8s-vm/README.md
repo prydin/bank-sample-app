@@ -4,6 +4,36 @@ All three tiers — **frontend** (nginx), **backend** (Node.js), and **database*
 
 The VMs do not carry an inlined copy of the app source. cloud-init `git clone`s this repository into each guest and runs the real `db/init.sql` + `db/seed.sql` (Postgres VM), builds the real TypeScript backend with `npm run build` (backend VM), or builds the React SPA with `npm run build` and serves it with nginx (frontend VM).
 
+## Static IPs and name resolution
+
+The VMs sit on a vSphere workload network whose DNS server (`10.1.1.1` in this lab) does not know K8s `Service` names or VM hostnames. To make tier-to-tier communication reliable, each VM has a **static IP** and each VM that needs to call another tier writes a small `/etc/hosts` entry in cloud-init.
+
+| Role     | Static IP        | Hostname        |
+|----------|------------------|-----------------|
+| frontend | `172.16.203.71`  | `bank-frontend` |
+| backend  | `172.16.203.72`  | `bank-backend`  |
+| postgres | `172.16.203.73`  | `bank-postgres` |
+
+Assumptions baked into the manifests (change in [10-postgres-vm.yaml](10-postgres-vm.yaml), [20-backend-vm.yaml](20-backend-vm.yaml), [30-frontend.yaml](30-frontend.yaml) if your network differs):
+
+- subnet prefix `/24`
+- gateway `172.16.203.1`
+- nameserver `10.1.1.1`
+
+Verify against an existing VM with `ip a`, `ip route`, and `resolvectl status`. The static-IP block lives under `spec.network.interfaces[0]` in each `VirtualMachine` and looks like:
+
+```yaml
+network:
+  hostName: bank-frontend
+  interfaces:
+    - name: eth0
+      addresses: ["172.16.203.71/24"]
+      gateway4: 172.16.203.1
+      nameservers: ["10.1.1.1"]
+```
+
+The frontend VM's cloud-init appends `172.16.203.72 backend` to `/etc/hosts` so `frontend/nginx.conf`'s `proxy_pass http://backend:4000;` resolves. The backend VM's cloud-init appends `172.16.203.73 postgres` so the backend's `DATABASE_URL=postgres://bank:bank@postgres:5432/bankdb` resolves. If you change a VM's IP, update both the static-IP block on that VM **and** the matching `/etc/hosts` entry on the VM that calls it.
+
 ## Prerequisites
 
 - A Kubernetes cluster with VM Operator running. In practice this means **vSphere with Tanzu (vSphere Supervisor)** in vSphere 7.0+, where VM Operator is installed and managed by VMware. Standalone deployment of VM Operator on a non-vSphere cluster is not a supported configuration.
@@ -80,9 +110,9 @@ When the backend is up, validate it via the frontend VM:
 
 ```powershell
 kubectl -n bank-vm-h93q9 get vmservice
-# Then from any pod or VM in the cluster:
-#   curl http://backend.bank-vm-h93q9.svc.cluster.local:4000/api/health
-#   curl http://backend.bank-vm-h93q9.svc.cluster.local:4000/api/accounts
+# Then from any host that can reach the workload network:
+#   curl http://172.16.203.72:4000/api/health
+#   curl http://172.16.203.72:4000/api/accounts
 ```
 
 > **Note:** the backend has no route registered for `/`. Hitting `http://<backend-vm-ip>:4000/` returns `Cannot GET /` from Express — that's expected, not a bug. Test against `/api/health` or `/api/accounts`. The user-facing entry point is the frontend, served on port 80 via the `frontend-lb` LoadBalancer.
@@ -138,5 +168,5 @@ kubectl -n bank-vm-h93q9 patch vm postgres --type=merge -p '{"spec":{"nextRestar
 - **`Cannot GET /` on the backend is not an error.** The backend only serves `/api/*` routes. The user-facing UI lives on the frontend VM (port 80) — reach it via the `frontend-lb` LoadBalancer.
 - **Storage.** The OS disk is provisioned from the chosen `VirtualMachineImage` and `StorageClass`. The database lives on that disk. For real persistence across redeploys, attach a PVC under `spec.volumes` and point `PGDATA` at it.
 - **First boot is slow.** `apt` and `npm install` run at first boot. For production you'd bake a custom image with everything pre-installed and skip the cloud-init `runcmd`.
-- **DNS & networking.** A `VirtualMachineService` creates a backing Kubernetes `Service` + `Endpoints`, so the VMs are reachable from pods (and from each other) at `postgres.bank-vm-h93q9.svc.cluster.local`, `backend.bank-vm-h93q9.svc.cluster.local`, and `frontend.bank-vm-h93q9.svc.cluster.local`. The frontend VM resolves `backend` via the same in-cluster DNS to proxy `/api/` calls.
-- **API version.** Manifests use `vmoperator.vmware.com/v1alpha5`. Earlier vSphere releases ship `v1alpha2`/`v1alpha3`/`v1alpha4`; the schema used here (`spec.className`, `spec.imageName`, `spec.storageClass`, `spec.bootstrap.cloudInit.rawCloudConfig`, `spec.powerState`) is compatible with all of them — only the `apiVersion:` line needs to change.
+- **DNS & networking.** Workload DNS does not know K8s `Service` names or VM hostnames, so tier-to-tier traffic goes by static IP via `/etc/hosts` (see the *Static IPs and name resolution* section above). The `VirtualMachineService` resources still produce backing `Service`s, but those `ClusterIP`s are not routable from the workload network.
+- **API version.** Manifests use `vmoperator.vmware.com/v1alpha5`. Earlier vSphere releases ship `v1alpha2`/`v1alpha3`/`v1alpha4`; the schema used here (`spec.className`, `spec.imageName`, `spec.storageClass`, `spec.bootstrap.cloudInit.rawCloudConfig`, `spec.powerState`, `spec.network.interfaces`) is compatible with `v1alpha3`+ — only the `apiVersion:` line needs to change for those.

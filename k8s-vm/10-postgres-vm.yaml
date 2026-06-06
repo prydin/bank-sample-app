@@ -75,6 +75,15 @@ spec:
     powerState: PoweredOn
     network:
         hostName: bank-postgres
+        # Static IP on the workload network. Adjust prefix/gateway/nameservers
+        # if your environment differs.
+        interfaces:
+            - name: eth0
+              addresses:
+                  - 172.16.203.73/24
+              gateway4: 172.16.203.1
+              nameservers:
+                  - 10.1.1.1
     bootstrap:
         cloudInit:
             rawCloudConfig:

@@ -64,6 +64,10 @@ stringData:
               [Install]
               WantedBy=multi-user.target
         runcmd:
+          # Map the upstream name `postgres` (used in the backend's DATABASE_URL)
+          # to the postgres VM's static IP. Workload DNS does not know K8s
+          # Service names or VM hostnames, so we use a static /etc/hosts entry.
+          - echo "172.16.203.73 postgres" >> /etc/hosts
           - bash -lc "curl -fsSL https://deb.nodesource.com/setup_20.x | bash -"
           - apt-get install -y nodejs
           - git clone https://github.com/prydin/bank-sample-app.git /opt/bank-app
@@ -88,6 +92,15 @@ spec:
     powerState: PoweredOn
     network:
         hostName: bank-backend
+        # Static IP on the workload network. Adjust prefix/gateway/nameservers
+        # if your environment differs.
+        interfaces:
+            - name: eth0
+              addresses:
+                  - 172.16.203.72/24
+              gateway4: 172.16.203.1
+              nameservers:
+                  - 10.1.1.1
     bootstrap:
         cloudInit:
             rawCloudConfig:
