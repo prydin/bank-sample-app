@@ -65,7 +65,7 @@ stringData:
           - git clone https://github.com/prydin/bank-sample-app.git /opt/bank-app
           - |
             set -euo pipefail
-            PG_CONF_DIR=$(ls -d /etc/postgresql/*/main | head -n1)
+            export PG_CONF_DIR=$(ls -d /etc/postgresql/*/main | head -n1)
             echo "listen_addresses = '*'" >> "$PG_CONF_DIR/postgresql.conf"
             echo "host all all 0.0.0.0/0 md5" >> "$PG_CONF_DIR/pg_hba.conf"
           - systemctl restart postgresql
