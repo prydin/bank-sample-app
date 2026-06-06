@@ -66,7 +66,7 @@ stringData:
           - |
             set -euo pipefail
             PG_CONF_DIR=$(ls -d /etc/postgresql/*/main | head -n1)
-            sed -i "s/^#\?listen_addresses.*/listen_addresses = '*'/" "$PG_CONF_DIR/postgresql.conf"
+            echo "listen_addresses = '*'" >> "$PG_CONF_DIR/postgresql.conf"
             echo "host all all 0.0.0.0/0 md5" >> "$PG_CONF_DIR/pg_hba.conf"
           - systemctl restart postgresql
           - sudo -u postgres psql -c "CREATE USER bank WITH PASSWORD 'bank';"
