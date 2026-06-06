@@ -13,4 +13,4 @@ jobs:
 
       - name: kubectl apply
         continue-on-error: true
-        run: vcf context use vcfa:bank-vm-h93q9:default-project; kubectl apply -f k8s-vm/
+        run: kubectl apply -f k8s-vm/
