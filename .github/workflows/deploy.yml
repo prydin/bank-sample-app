@@ -8,8 +8,63 @@ on:
 jobs:
   deploy:
     runs-on: self-hosted
+    env:
+      NS: bank-vm-h93q9
     steps:
       - uses: actions/checkout@v4
+
+      - name: Detect changed files
+        id: changed-files
+        # NOTE: pin to a full commit SHA, not a tag. tj-actions/changed-files
+        # was compromised via a tag-retargeting supply-chain attack in 2025,
+        # and this runs on a self-hosted runner with cluster credentials.
+        # Replace the ref below with the SHA of the release you've vetted.
+        uses: tj-actions/changed-files@<PINNED_COMMIT_SHA>  # e.g. v46
+
+      # Map changed manifests -> VM names. Only those VMs get power-cycled.
+      - name: Detect changed VMs
+        id: changes
+        run: |
+          changed=""
+          for file in ${{ steps.changed-files.outputs.all_changed_files }}; do
+            case "$file" in
+              k8s-vm/10-postgres-vm.yaml) changed="$changed postgres" ;;
+              k8s-vm/20-backend-vm.yaml)  changed="$changed backend"  ;;
+              k8s-vm/30-frontend.yaml)    changed="$changed frontend" ;;
+            esac
+          done
+          echo "Changed VMs:${changed:- (none)}"
+          echo "vms=$(echo $changed | xargs)" >> "$GITHUB_OUTPUT"
+
+      # VM Operator only allows reconfiguration (className, etc.) while the VM
+      # is powered off. Patch the changed VMs off and wait before the apply
+      # puts them back to PoweredOn.
+      - name: Power off changed VMs
+        if: steps.changes.outputs.vms != ''
+        run: |
+          for vm in ${{ steps.changes.outputs.vms }}; do
+            if kubectl -n "$NS" get virtualmachine "$vm" >/dev/null 2>&1; then
+              echo "Powering off $vm"
+              kubectl -n "$NS" patch virtualmachine "$vm" --type merge \
+                -p '{"spec":{"powerState":"PoweredOff"}}'
+            else
+              echo "$vm not found yet (first deploy?) -- skipping"
+            fi
+          done
+
+      - name: Wait for VMs to power off
+        if: steps.changes.outputs.vms != ''
+        run: |
+          for vm in ${{ steps.changes.outputs.vms }}; do
+            kubectl -n "$NS" get virtualmachine "$vm" >/dev/null 2>&1 || continue
+            echo "Waiting for $vm to report PoweredOff..."
+            for i in $(seq 1 60); do
+              state=$(kubectl -n "$NS" get virtualmachine "$vm" \
+                -o jsonpath='{.status.powerState}' 2>/dev/null || true)
+              [ "$state" = "PoweredOff" ] && { echo "$vm is off"; break; }
+              sleep 5
+            done
+          done
 
       - name: kubectl apply
         run: kubectl apply -f k8s-vm/
