@@ -19,8 +19,7 @@ jobs:
         # was compromised via a tag-retargeting supply-chain attack in 2025,
         # and this runs on a self-hosted runner with cluster credentials.
         # Replace the ref below with the SHA of the release you've vetted.
-        uses: tj-actions/changed-files@<PINNED_COMMIT_SHA>  # e.g. v46
-
+        uses: tj-actions/changed-files@v46
       # Map changed manifests -> VM names. Only those VMs get power-cycled.
       - name: Detect changed VMs
         id: changes
