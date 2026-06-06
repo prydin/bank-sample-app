@@ -134,3 +134,9 @@ dist
 .yarn/build-state.yml
 .yarn/install-state.gz
 .pnp.*
+
+# Secrets / credentials -- never commit
+*.b64
+kubeconfig
+kubeconfig.*
+*.kubeconfig
