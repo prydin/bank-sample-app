@@ -15,13 +15,16 @@
 # which is committed once after the one-time setup below and never changes for
 # the lifetime of the `dns-lb` Service.
 #
+# None of these manifests hard-code a namespace; pick one at deploy time with
+# `kubectl -n <namespace> apply ...` (the namespace must already exist).
+#
 # ONE-TIME SETUP (do this before first applying 10/20/30):
-#   1. kubectl apply -f k8s-vm/00-namespace.yaml -f k8s-vm/05-dns.yaml
-#   2. kubectl -n bank-vm-h93q9 get svc dns-lb \
+#   1. kubectl -n <namespace> apply -f k8s-vm/05-dns.yaml
+#   2. kubectl -n <namespace> get svc dns-lb \
 #        -o jsonpath='{.status.loadBalancer.ingress[0].ip}'
 #   3. Replace the string 10.1.9.11 in 10-postgres-vm.yaml,
 #      20-backend-vm.yaml, and 30-frontend.yaml with that value, and commit.
-#   4. kubectl apply -f k8s-vm/
+#   4. kubectl -n <namespace> apply -f k8s-vm/
 #
 # The TSIG key below is a demo placeholder -- rotate for any non-demo use.
 ---
@@ -29,7 +32,6 @@ apiVersion: v1
 kind: ConfigMap
 metadata:
     name: bind9-config
-    namespace: bank-vm-h93q9
 data:
     named.conf: |
         options {
@@ -68,7 +70,6 @@ apiVersion: apps/v1
 kind: Deployment
 metadata:
     name: bind9
-    namespace: bank-vm-h93q9
 spec:
     replicas: 1
     strategy:
@@ -118,7 +119,6 @@ apiVersion: v1
 kind: Service
 metadata:
     name: dns-lb
-    namespace: bank-vm-h93q9
 spec:
     type: LoadBalancer
     selector:

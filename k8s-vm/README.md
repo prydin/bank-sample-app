@@ -23,16 +23,18 @@ The TSIG key inlined in [05-dns.yaml](05-dns.yaml) (and in each app VM's `write_
 ## Prerequisites
 
 - A Kubernetes cluster with VM Operator running. In practice this means **vSphere with Tanzu (vSphere Supervisor)** in vSphere 7.0+, where VM Operator is installed and managed by VMware. Standalone deployment of VM Operator on a non-vSphere cluster is not a supported configuration.
-- A Supervisor namespace (`bank-vm-h93q9` in these manifests) that has at least one published `VirtualMachineClass`, `VirtualMachineImage`, and `StorageClass` associated with it.
+- An existing Supervisor namespace that has at least one published `VirtualMachineClass`, `VirtualMachineImage`, and `StorageClass` associated with it. The manifests do **not** hard-code a namespace — you choose it at deploy time with `kubectl -n <namespace> ...` (see [Deploy](#deploy)). The examples below use a `$NS` variable for this; set it once per session.
 - A LoadBalancer provider in the cluster (NSX, Avi, MetalLB, kube-vip, ...) for the `frontend-lb` `VirtualMachineService`.
 - Optional: an ingress controller if you also want to use the `Ingress` in `40-ingress.yaml`.
 
 Verify VM Operator is healthy and discover what is available in your namespace:
 
 ```powershell
+$NS = "bank-vm-h93q9"   # <-- your existing Supervisor namespace
+
 kubectl api-resources --api-group=vmoperator.vmware.com
-kubectl -n bank-vm-h93q9 get vmclass
-kubectl -n bank-vm-h93q9 get vmimage
+kubectl -n $NS get vmclass
+kubectl -n $NS get vmimage
 kubectl get storageclass
 ```
 
@@ -40,12 +42,13 @@ kubectl get storageclass
 
 | File | Purpose |
 |------|---------|
-| `00-namespace.yaml`     | `bank-vm-h93q9` namespace |
 | `05-dns.yaml`           | bind9 `Deployment` + `Service` (`dns-lb`, `LoadBalancer`) serving the `bank.local` zone, plus the TSIG key in a `ConfigMap`. App VMs self-register here at boot. See [Internal DNS](#internal-dns). |
 | `10-postgres-vm.yaml`   | Postgres `VirtualMachine` + bootstrap `Secret` (cloud-init `apt install`s postgresql, clones the repo, applies `db/init.sql` + `db/seed.sql`) |
 | `20-backend-vm.yaml`    | Node.js backend `VirtualMachine` + bootstrap `Secret` (cloud-init installs Node 20 from NodeSource, clones the repo, runs `npm install && npm run build`, then starts `node dist/index.js` under systemd) |
 | `30-frontend.yaml`      | nginx frontend `VirtualMachine` + bootstrap `Secret` + the user-facing `frontend-lb` `VirtualMachineService` of type `LoadBalancer` (ports 80/22). cloud-init installs Node 20 + nginx, clones the repo, runs `npm run build`, copies the `dist/` output into `/usr/share/nginx/html`, and installs `frontend/nginx.conf` which reverse-proxies `/api/` to `backend:4000`. |
-| `40-ingress.yaml`       | Optional `Ingress` at `bank-vm-h93q9.local` (routes `/` to the `frontend-lb` Service) |
+| `40-ingress.yaml`       | Optional `Ingress` at `bank.local` (routes `/` to the `frontend-lb` Service) |
+
+None of these resources set `metadata.namespace`; apply them into your chosen namespace with `kubectl -n $NS apply -f ...`.
 
 ## Pick a class, image, and storage class
 
@@ -62,10 +65,10 @@ Replace each one with a value that exists in your Supervisor namespace:
 
 ```powershell
 # Find a class (CPU/memory shape)
-kubectl -n bank-vm-h93q9 get vmclass
+kubectl -n $NS get vmclass
 
 # Find an Ubuntu cloud image (these manifests target Ubuntu 22.04 / 24.04 noble)
-kubectl -n bank-vm-h93q9 get vmimage
+kubectl -n $NS get vmimage
 
 # Find a storage class associated with the namespace
 kubectl get storageclass
@@ -77,22 +80,28 @@ The VMs need outbound internet to reach `github.com`, `archive.ubuntu.com`, `deb
 
 ## Deploy
 
-First-time setup is a two-step affair: bring up bind9, learn its LoadBalancer VIP, commit that VIP into the three VM manifests, then apply the rest. Subsequent re-deploys are a single `kubectl apply -f k8s-vm/`.
+All examples assume you've set `$NS` to your existing Supervisor namespace:
+
+```powershell
+$NS = "bank-vm-h93q9"   # <-- change to your namespace
+```
+
+First-time setup is a two-step affair: bring up bind9, learn its LoadBalancer VIP, commit that VIP into the three VM manifests, then apply the rest. Subsequent re-deploys are a single `kubectl -n $NS apply -f k8s-vm/`.
 
 ### One-time DNS bootstrap
 
 ```powershell
-kubectl apply -f k8s-vm/00-namespace.yaml -f k8s-vm/05-dns.yaml
+kubectl -n $NS apply -f k8s-vm/05-dns.yaml
 
 # Wait for the LoadBalancer to allocate a VIP, then read it:
-kubectl -n bank-vm-h93q9 get svc dns-lb `
+kubectl -n $NS get svc dns-lb `
     -o jsonpath='{.status.loadBalancer.ingress[0].ip}'
 ```
 
 Replace every occurrence of the literal string `__DNS_LB_IP__` in [10-postgres-vm.yaml](10-postgres-vm.yaml), [20-backend-vm.yaml](20-backend-vm.yaml), and [30-frontend.yaml](30-frontend.yaml) with that VIP, and commit. PowerShell one-liner if you like:
 
 ```powershell
-$vip = kubectl -n bank-vm-h93q9 get svc dns-lb -o jsonpath='{.status.loadBalancer.ingress[0].ip}'
+$vip = kubectl -n $NS get svc dns-lb -o jsonpath='{.status.loadBalancer.ingress[0].ip}'
 Get-ChildItem k8s-vm/10-postgres-vm.yaml,k8s-vm/20-backend-vm.yaml,k8s-vm/30-frontend.yaml |
     ForEach-Object {
         (Get-Content -Raw $_.FullName) -replace '__DNS_LB_IP__', $vip |
@@ -103,16 +112,16 @@ Get-ChildItem k8s-vm/10-postgres-vm.yaml,k8s-vm/20-backend-vm.yaml,k8s-vm/30-fro
 ### Apply the rest
 
 ```powershell
-kubectl apply -f k8s-vm/
+kubectl -n $NS apply -f k8s-vm/
 ```
 
 Watch the VMs come up:
 
 ```powershell
-kubectl -n bank-vm-h93q9 get vm,vmservice,deploy,svc
-kubectl -n bank-vm-h93q9 describe vm postgres
-kubectl -n bank-vm-h93q9 describe vm backend
-kubectl -n bank-vm-h93q9 describe vm frontend
+kubectl -n $NS get vm,vmservice,deploy,svc
+kubectl -n $NS describe vm postgres
+kubectl -n $NS describe vm backend
+kubectl -n $NS describe vm frontend
 ```
 
 First boot is slow — the OS image clone runs, then cloud-init installs packages, clones the repo, and either seeds the DB, builds the backend, or builds the SPA. Expect a few minutes before the app is reachable. Tail progress on a VM via the web console (see below) and watch `/var/log/cloud-init-output.log`.
@@ -120,15 +129,15 @@ First boot is slow — the OS image clone runs, then cloud-init installs package
 You can confirm DNS self-registration is working from inside any app VM or from the bind9 Pod:
 
 ```powershell
-kubectl -n bank-vm-h93q9 exec deploy/bind9 -- dig @127.0.0.1 +short postgres.bank.local
-kubectl -n bank-vm-h93q9 exec deploy/bind9 -- dig @127.0.0.1 +short backend.bank.local
-kubectl -n bank-vm-h93q9 exec deploy/bind9 -- dig @127.0.0.1 +short frontend.bank.local
+kubectl -n $NS exec deploy/bind9 -- dig @127.0.0.1 +short postgres.bank.local
+kubectl -n $NS exec deploy/bind9 -- dig @127.0.0.1 +short backend.bank.local
+kubectl -n $NS exec deploy/bind9 -- dig @127.0.0.1 +short frontend.bank.local
 ```
 
 When the backend is up, validate it from any host that can reach the workload network:
 
 ```powershell
-kubectl -n bank-vm-h93q9 get vm backend -o jsonpath='{.status.network.primaryIP4}{"\n"}'
+kubectl -n $NS get vm backend -o jsonpath='{.status.network.primaryIP4}{"\n"}'
 # Then:
 #   curl http://<that-ip>:4000/api/health
 #   curl http://<that-ip>:4000/api/accounts
@@ -141,7 +150,7 @@ kubectl -n bank-vm-h93q9 get vm backend -o jsonpath='{.status.network.primaryIP4
 Grab the LoadBalancer's external IP:
 
 ```powershell
-kubectl -n bank-vm-h93q9 get vmservice frontend-lb
+kubectl -n $NS get vmservice frontend-lb
 ```
 
 Open `http://<EXTERNAL-IP>/` in a browser. The nginx VM serves the React SPA at `/` and reverse-proxies `/api/` to the backend VM.
@@ -149,7 +158,7 @@ Open `http://<EXTERNAL-IP>/` in a browser. The nginx VM serves the React SPA at 
 If no LoadBalancer provider is available, port-forward instead:
 
 ```powershell
-kubectl -n bank-vm-h93q9 port-forward svc/frontend-lb 8080:80
+kubectl -n $NS port-forward svc/frontend-lb 8080:80
 ```
 
 and open http://localhost:8080.
@@ -158,27 +167,26 @@ and open http://localhost:8080.
 
 ```powershell
 # VM details, IP, conditions, power state
-kubectl -n bank-vm-h93q9 get vm
-kubectl -n bank-vm-h93q9 get vm postgres -o yaml | less
+kubectl -n $NS get vm
+kubectl -n $NS get vm postgres -o yaml | less
 
 # Get a web console session (returns a one-time URL)
-kubectl -n bank-vm-h93q9 apply -f - <<'EOF'
+kubectl -n $NS apply -f - <<'EOF'
 apiVersion: vmoperator.vmware.com/v1alpha5
 kind: VirtualMachineWebConsoleRequest
 metadata:
   name: postgres-console
-  namespace: bank-vm-h93q9
 spec:
   name: postgres
 EOF
-kubectl -n bank-vm-h93q9 get virtualmachinewebconsolerequest postgres-console -o yaml
+kubectl -n $NS get virtualmachinewebconsolerequest postgres-console -o yaml
 
 # Power-cycle (re-runs cloud-init, re-seeds the DB)
-kubectl -n bank-vm-h93q9 patch vm postgres --type=merge -p '{"spec":{"powerState":"PoweredOff"}}'
-kubectl -n bank-vm-h93q9 patch vm postgres --type=merge -p '{"spec":{"powerState":"PoweredOn"}}'
+kubectl -n $NS patch vm postgres --type=merge -p '{"spec":{"powerState":"PoweredOff"}}'
+kubectl -n $NS patch vm postgres --type=merge -p '{"spec":{"powerState":"PoweredOn"}}'
 
 # Or trigger an in-guest restart
-kubectl -n bank-vm-h93q9 patch vm postgres --type=merge -p '{"spec":{"nextRestartTime":"now"}}'
+kubectl -n $NS patch vm postgres --type=merge -p '{"spec":{"nextRestartTime":"now"}}'
 ```
 
 ## Notes & limitations
