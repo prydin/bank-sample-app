@@ -44,24 +44,10 @@ stringData:
               DNS=10.1.9.11
               Domains=bank.local
               FallbackDNS=10.1.1.1 8.8.8.8
-          - path: /usr/local/sbin/bank-register-dns.sh
-            permissions: '0755'
-            content: |
-              #!/bin/sh
-              set -e
-              MYIP=$(hostname -I | awk '{print $1}')
-              HOST=$(hostname -s)
-              nsupdate -k /etc/bank/tsig.key <<EOF
-              server 10.1.9.11
-              zone bank.local.
-              update delete $HOST.bank.local. A
-              update add $HOST.bank.local. 60 A $MYIP
-              send
-              EOF
         runcmd:
           - systemctl restart systemd-resolved
-          - /usr/local/sbin/bank-register-dns.sh
           - git clone https://github.com/prydin/bank-sample-app.git /opt/bank-app
+          - sh /opt/bank-app/k8s-vm/bank-register-dns.sh
           - |
             set -eu
             PG_CONF_DIR=$(ls -d /etc/postgresql/*/main | head -n1)
