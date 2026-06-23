@@ -111,7 +111,9 @@ spec:
     selector:
       app: frontend
     ports:
-      - port: 80
+      - name: http
+        port: 80
         targetPort: 80
-      - port: 22
+      - name: ssh
+        port: 22
         targetPort: 22
