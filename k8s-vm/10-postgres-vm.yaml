@@ -41,13 +41,14 @@ stringData:
             permissions: '0644'
             content: |
               [Resolve]
-              DNS=10.1.9.11
+              DNS=10.9.1.6
               Domains=bank.local
               FallbackDNS=10.1.1.1 8.8.8.8
         runcmd:
           - systemctl restart systemd-resolved
           - git clone https://github.com/prydin/bank-sample-app.git /opt/bank-app
-          - sh /opt/bank-app/k8s-vm/bank-register-dns.sh
+          - chmod +x /opt/bank-app/k8s-vm/bank-register-dns.sh
+          - /opt/bank-app/k8s-vm/bank-register-dns.sh
           - |
             set -eu
             PG_CONF_DIR=$(ls -d /etc/postgresql/*/main | head -n1)
