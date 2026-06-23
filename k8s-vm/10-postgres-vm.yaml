@@ -48,7 +48,7 @@ stringData:
           - systemctl restart systemd-resolved
           - git clone https://github.com/prydin/bank-sample-app.git /opt/bank-app
           - chmod +x /opt/bank-app/k8s-vm/bank-register-dns.sh
-          - /opt/bank-app/k8s-vm/bank-register-dns.sh
+          # - /opt/bank-app/k8s-vm/bank-register-dns.sh
           - |
             set -eu
             PG_CONF_DIR=$(ls -d /etc/postgresql/*/main | head -n1)
