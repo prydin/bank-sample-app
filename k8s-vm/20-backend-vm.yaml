@@ -85,7 +85,7 @@ spec:
     # Supervisor namespace -- see the README.
     className: best-effort-medium
     # Friendly image name: noble-server-cloudimg-amd64
-    imageName: vmi-0f70942d16a5bd4ed
+    imageName: ubuntu
     storageClass: vsan-default-storage-policy
     powerState: PoweredOn
     network:

@@ -74,7 +74,7 @@ spec:
     # to discover what is available in your Supervisor namespace.
     className: best-effort-xsmall
     # Friendly image name: noble-server-cloudimg-amd64
-    imageName: vmi-0f70942d16a5bd4ed
+    imageName: ubuntu
     storageClass: vsan-default-storage-policy
 
     powerState: PoweredOn
