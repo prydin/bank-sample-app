@@ -15,6 +15,8 @@ if [ -z "$NS" ]; then
     exit 1
 fi
 
+DNS_VIP=10.1.8.133
+
 # Run relative to this script's directory so it works from any cwd.
 DIR=$(CDPATH= cd -- "$(dirname -- "$0")" && pwd)
 
@@ -26,7 +28,7 @@ for f in \
     40-ingress.yaml
 do
     echo "Applying $f into namespace $NS..."
-    kubectl -n "$NS" apply -f "$DIR/$f"
+    envsubst < "$DIR/$f" | kubectl -n "$NS" apply -f -
 done
 
 echo "Done. Watch progress with: kubectl -n $NS get vm,vmservice,deploy,svc"
