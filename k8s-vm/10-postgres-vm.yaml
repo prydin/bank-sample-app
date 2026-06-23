@@ -87,8 +87,12 @@ spec:
                 name: postgres-bootstrap
                 key: user-data
 
-services:
-  - name: postgres
+---
+apiVersion: v1
+kind: Service
+metadata:
+    name: postgres
+spec:
     ports:
       - port: 5432
         targetPort: 5432
