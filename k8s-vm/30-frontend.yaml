@@ -62,14 +62,14 @@ stringData:
             permissions: '0644'
             content: |
               [Resolve]
-              DNS=10.9.1.8
-              Domains=bank.local
+              DNS=$DNS_VIP
+              Domains=frontend.$NS.svc.cluster.local
               FallbackDNS=10.1.1.1 8.8.8.8
         runcmd:
           - systemctl restart systemd-resolved
           - git clone https://github.com/prydin/bank-sample-app.git /opt/bank-app
           - chmod +x /opt/bank-app/k8s-vm/bank-register-dns.sh
-          - /opt/bank-app/k8s-vm/bank-register-dns.sh
+          # - /opt/bank-app/k8s-vm/bank-register-dns.sh
           - bash -lc "curl -fsSL https://deb.nodesource.com/setup_20.x | bash -"
           - apt-get install -y nodejs
           - bash -lc "cd /opt/bank-app/frontend && npm install && npm run build"
@@ -77,7 +77,7 @@ stringData:
           - cp -r /opt/bank-app/frontend/dist /usr/share/nginx/html
           - rm -f /etc/nginx/sites-enabled/default
           - cp /opt/bank-app/frontend/nginx.conf /etc/nginx/conf.d/bank.conf
-          - bash -lc 'for i in $(seq 1 120); do getent hosts backend.bank.local >/dev/null 2>&1 && break; echo "waiting for backend.bank.local..."; sleep 5; done'
+          - bash -lc 'for i in $(seq 1 120); do getent hosts backend.$NS.svc.cluster.local >/dev/null 2>&1 && break; echo "waiting for backend.$NS.svc.cluster.local..."; sleep 5; done'
           - nginx -t
           - systemctl restart nginx
 ---
@@ -102,3 +102,16 @@ spec:
             rawCloudConfig:
                 name: frontend-bootstrap
                 key: user-data
+---
+apiVersion: v1
+kind: Service
+metadata:
+    name: frontend
+spec:
+    selector:
+      app: frontend
+    ports:
+      - port: 80
+        targetPort: 80
+      - port: 22
+        targetPort: 22

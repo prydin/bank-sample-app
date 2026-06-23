@@ -41,8 +41,8 @@ stringData:
             permissions: '0644'
             content: |
               [Resolve]
-              DNS=10.9.1.8
-              Domains=bank.local
+              DNS=$DNS_VIP
+              Domains=postgres.$NS.svc.cluster.local
               FallbackDNS=10.1.1.1 8.8.8.8
         runcmd:
           - systemctl restart systemd-resolved

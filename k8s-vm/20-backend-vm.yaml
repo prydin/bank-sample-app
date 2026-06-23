@@ -41,8 +41,8 @@ stringData:
             permissions: '0644'
             content: |
               [Resolve]
-              DNS=10.9.1.8
-              Domains=bank.local
+              DNS=$DNS_VIP
+              Domains=backend.$NS.svc.cluster.local
               FallbackDNS=10.1.1.1 8.8.8.8
           - path: /etc/systemd/system/bank-backend.service
             permissions: '0644'
@@ -68,7 +68,7 @@ stringData:
           - systemctl restart systemd-resolved
           - git clone https://github.com/prydin/bank-sample-app.git /opt/bank-app
           - chmod +x /opt/bank-app/k8s-vm/bank-register-dns.sh
-          - /opt/bank-app/k8s-vm/bank-register-dns.sh
+         # - /opt/bank-app/k8s-vm/bank-register-dns.sh
           - bash -lc "curl -fsSL https://deb.nodesource.com/setup_20.x | bash -"
           - apt-get install -y nodejs
           - bash -lc "cd /opt/bank-app/backend && npm install && npm run build"
@@ -96,3 +96,15 @@ spec:
             rawCloudConfig:
                 name: backend-bootstrap
                 key: user-data
+
+---
+apiVersion: v1
+kind: Service
+metadata:
+    name: backend
+spec:
+    selector:
+      app: backend
+    ports:
+      - port: 5432
+        targetPort: 5432
