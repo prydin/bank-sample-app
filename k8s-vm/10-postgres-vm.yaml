@@ -86,3 +86,9 @@ spec:
             rawCloudConfig:
                 name: postgres-bootstrap
                 key: user-data
+
+services:
+  - name: postgres
+    ports:
+      - port: 5432
+        targetPort: 5432
