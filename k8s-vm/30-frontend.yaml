@@ -103,13 +103,14 @@ spec:
                 name: frontend-bootstrap
                 key: user-data
 ---
-apiVersion: v1
-kind: Service
+apiVersion: vmoperator.vmware.com/v1alpha3
+kind: VirtualMachineService
 metadata:
     name: frontend
 spec:
     selector:
       app: frontend
+    type: ClusterIP
     ports:
       - name: http
         port: 80

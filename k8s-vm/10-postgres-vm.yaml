@@ -88,8 +88,8 @@ spec:
                 key: user-data
 
 ---
-apiVersion: v1
-kind: Service
+apiVersion: vmoperator.vmware.com/v1alpha3
+kind: VirtualMachineService
 metadata:
     name: postgres
 spec:
