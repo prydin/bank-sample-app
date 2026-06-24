@@ -1,0 +1,104 @@
+apiVersion: vmoperator.vmware.com/v1alpha5
+kind: VirtualMachineService
+metadata:
+    name: jumpbox
+spec:
+    type: LoadBalancer
+    selector:
+        app: jumpbox
+    ports:
+        - name: ssh
+          protocol: TCP
+          port: 22
+          targetPort: 22
+---
+apiVersion: vmoperator.vmware.com/v1alpha5
+kind: VirtualMachineService
+metadata:
+    name: server
+spec:
+    type: ClusterIP
+    selector:
+        app: server
+    ports:
+        - name: http
+          protocol: TCP
+          port: 80
+          targetPort: 80
+        - name: ssh
+          protocol: TCP
+          port: 22
+          targetPort: 22
+---
+apiVersion: v1
+kind: Secret
+metadata:
+    name: test-bootstrap
+type: Opaque
+stringData:
+    user-data: |
+        #cloud-config
+        users:
+          - name: ubuntu
+            sudo: ALL=(ALL) NOPASSWD:ALL
+            shell: /bin/bash
+            lock_passwd: false
+            # ************ You will have to update this! ************
+            ssh_authorized_keys:
+              - ssh-rsa AAAAB3NzaC1yc2EAAAADAQABAAABAQC7g2UVzeb551EVgpvy24KlswRL7Nr5cbJm/tuObWuw2HpUZ5HtoFyV3SbRyWWAU+CJDw0OaZVoxOGB5zV8jyKWoVrU4HAB7dABZNXXBreAbat7h9kf03KeJofRO/KFqj47FDJhj2yE3nCArK4aeOiuum4p7t7KL6zFXbXs7DGxeuEtxONLvMDqhyDyyQSJ7VUlA8AnO7mdHtnZ1kfTE/EHH0lj3qxaiZqkNC2onn/d64ctsGcmzgCt9BkgooQNd3c8HMCVs5LIZrc2ZbZvGGOvmApZwNCnKooTFGDawTNflPEV3FNdN6VN3lrR3mhaVKN5N2BS3froY/gY3Tq4a0kd holuser@console
+        package_update: true
+        package_upgrade: false
+        packages:
+          - ca-certificates
+          - curl
+          - git
+          - nginx
+          - bind9-dnsutils
+        runcmd:
+          - systemctl restart systemd-resolved
+          - nginx -t
+          - systemctl restart nginx
+---
+apiVersion: vmoperator.vmware.com/v1alpha5
+kind: VirtualMachine
+metadata:
+    name: server
+    labels:
+        app: server
+spec:
+    # Adjust these to a class, image, and StorageClass that exist in your
+    # Supervisor namespace -- see the README.
+    className: best-effort-small
+    # Friendly image name: noble-server-cloudimg-amd64
+    imageName: ubuntu
+    storageClass: vsan-default-storage-policy
+    powerState: PoweredOn
+    network:
+        hostName: server
+    bootstrap:
+        cloudInit:
+            rawCloudConfig:
+                name: test-bootstrap
+                key: user-data
+---
+apiVersion: vmoperator.vmware.com/v1alpha5
+kind: VirtualMachine
+metadata:
+    name: jumpbox
+    labels:
+        app: jumpbox
+spec:
+    # Adjust these to a class, image, and StorageClass that exist in your
+    # Supervisor namespace -- see the README.
+    className: best-effort-small
+    # Friendly image name: noble-server-cloudimg-amd64
+    imageName: ubuntu
+    storageClass: vsan-default-storage-policy
+    powerState: PoweredOn
+    network:
+        hostName: jumpbox
+    bootstrap:
+        cloudInit:
+            rawCloudConfig:
+                name: test-bootstrap
+                key: user-data

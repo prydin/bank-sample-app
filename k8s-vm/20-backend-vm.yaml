@@ -105,7 +105,7 @@ metadata:
 spec:
     selector:
       app: backend
-    type: ClusterIP
+    type: LoadBalancer
     ports:
       - name: http
         port: 80

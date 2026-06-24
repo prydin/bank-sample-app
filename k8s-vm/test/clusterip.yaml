@@ -1,0 +1,129 @@
+# Frontend running inside a VMware VM Operator VirtualMachine (Ubuntu cloud image).
+# cloud-init installs Node.js 20 + nginx, clones this repo, builds the SPA with
+# `npm run build`, deploys the static assets to nginx, and installs the project's
+# nginx.conf (which reverse-proxies /api/ to the `backend` host -- resolved by
+# the bind9 DNS server in 05-dns.yaml).
+#
+# `frontend-lb` is a LoadBalancer VirtualMachineService that puts a public VIP
+# in front of this VM on ports 80 (HTTP) and 22 (SSH). It's the only externally
+# reachable endpoint of the application.
+
+apiVersion: vmoperator.vmware.com/v1alpha5
+kind: VirtualMachineService
+metadata:
+    name: jumpbox-lb
+spec:
+    type: LoadBalancer
+    selector:
+        app: jumpbox
+    ports:
+        - name: ssh
+          protocol: TCP
+          port: 22
+          targetPort: 22
+---
+apiVersion: vmoperator.vmware.com/v1alpha5
+kind: VirtualMachineService
+metadata:
+    name: webserver-cip
+spec:
+    type: LoadBalancer
+    selector:
+        app: webserver
+    ports:
+        - name: http
+          protocol: TCP
+          port: 80
+          targetPort: 80
+        - name: ssh
+          protocol: TCP
+          port: 22
+          targetPort: 22
+---
+apiVersion: v1
+kind: Secret
+metadata:
+    name: test-bootstrap
+type: Opaque
+stringData:
+    user-data: |
+        #cloud-config
+        # hostname: webserver
+        users:
+          - name: ubuntu
+            sudo: ALL=(ALL) NOPASSWD:ALL
+            shell: /bin/bash
+            lock_passwd: false
+            ssh_authorized_keys:
+              - ssh-rsa AAAAB3NzaC1yc2EAAAADAQABAAABAQC7g2UVzeb551EVgpvy24KlswRL7Nr5cbJm/tuObWuw2HpUZ5HtoFyV3SbRyWWAU+CJDw0OaZVoxOGB5zV8jyKWoVrU4HAB7dABZNXXBreAbat7h9kf03KeJofRO/KFqj47FDJhj2yE3nCArK4aeOiuum4p7t7KL6zFXbXs7DGxeuEtxONLvMDqhyDyyQSJ7VUlA8AnO7mdHtnZ1kfTE/EHH0lj3qxaiZqkNC2onn/d64ctsGcmzgCt9BkgooQNd3c8HMCVs5LIZrc2ZbZvGGOvmApZwNCnKooTFGDawTNflPEV3FNdN6VN3lrR3mhaVKN5N2BS3froY/gY3Tq4a0kd holuser@console
+        package_update: true
+        package_upgrade: false
+        packages:
+          - ca-certificates
+          - curl
+          - git
+          - nginx
+          - bind9-dnsutils
+        write_files:
+          - path: /etc/bank/tsig.key
+            permissions: '0600'
+            content: |
+              key "update-key" {
+                  algorithm hmac-sha256;
+                  secret "C5oOXzv1cN3Sd5VYx7uH+TpKQB8K5J0jSqQ5kPdJfFY=";
+              };
+          - path: /etc/systemd/resolved.conf.d/bank.conf
+            permissions: '0644'
+            content: |
+              [Resolve]
+              DNS=$DNS_VIP
+              Domains=$NS.svc.cluster.local
+              FallbackDNS=10.1.1.1 8.8.8.8
+        runcmd:
+          - systemctl restart systemd-resolved
+          - nginx -t
+          - systemctl restart nginx
+---
+apiVersion: vmoperator.vmware.com/v1alpha5
+kind: VirtualMachine
+metadata:
+    name: webserver
+    labels:
+        app: webserver
+spec:
+    # Adjust these to a class, image, and StorageClass that exist in your
+    # Supervisor namespace -- see the README.
+    className: best-effort-small
+    # Friendly image name: noble-server-cloudimg-amd64
+    imageName: ubuntu
+    storageClass: vsan-default-storage-policy
+    powerState: PoweredOn
+    network:
+        hostName: webserver
+    bootstrap:
+        cloudInit:
+            rawCloudConfig:
+                name: test-bootstrap
+                key: user-data
+---
+apiVersion: vmoperator.vmware.com/v1alpha5
+kind: VirtualMachine
+metadata:
+    name: jumpbox
+    labels:
+        app: jumpbox
+spec:
+    # Adjust these to a class, image, and StorageClass that exist in your
+    # Supervisor namespace -- see the README.
+    className: best-effort-small
+    # Friendly image name: noble-server-cloudimg-amd64
+    imageName: ubuntu
+    storageClass: vsan-default-storage-policy
+    powerState: PoweredOn
+    network:
+        hostName: jumpbox
+    bootstrap:
+        cloudInit:
+            rawCloudConfig:
+                name: test-bootstrap
+                key: user-data
