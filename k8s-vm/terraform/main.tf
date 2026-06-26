@@ -1,12 +1,14 @@
-# Frontend VirtualMachine (VM Operator). The frontend-bootstrap Secret and the
-# frontend-lb VirtualMachineService it relies on are created elsewhere.
+# Frontend VirtualMachines (VM Operator). The frontend-bootstrap Secret and the
+# frontend-lb VirtualMachineService they rely on are created elsewhere.
 resource "kubernetes_manifest" "frontend" {
+  count = var.vm_count
+
   manifest = {
     apiVersion = "vmoperator.vmware.com/v1alpha5"
     kind       = "VirtualMachine"
 
     metadata = {
-      name      = "frontend"
+      name      = format("frontend-%02d", count.index + 1)
       namespace = var.namespace
       labels = {
         app = "frontend"
@@ -22,7 +24,7 @@ resource "kubernetes_manifest" "frontend" {
       powerState    = "PoweredOn"
 
       network = {
-        hostName = "frontend"
+        hostName = format("frontend-%02d", count.index + 1)
       }
 
       bootstrap = {
