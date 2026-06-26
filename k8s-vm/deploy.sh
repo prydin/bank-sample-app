@@ -24,11 +24,10 @@ DIR=$(CDPATH= cd -- "$(dirname -- "$0")" && pwd)
 for f in \
     10-postgres-vm.yaml \
     20-backend-vm.yaml \
-    30-frontend.yaml \
-    40-ingress.yaml
+    30-frontend.yaml 
 do
     echo "Applying $f into namespace $NS..."
-    envsubst < "$DIR/$f" | kubectl -n "$NS" apply -f -
+    envsubst < "$DIR/$f" '$NS $DNS_VIP' | kubectl -n "$NS" apply -f -
 done
 
 echo "Done. Watch progress with: kubectl -n $NS get vm,vmservice,deploy,svc"

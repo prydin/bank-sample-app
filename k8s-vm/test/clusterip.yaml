@@ -11,7 +11,7 @@
 apiVersion: vmoperator.vmware.com/v1alpha5
 kind: VirtualMachineService
 metadata:
-    name: jumpbox-lb
+    name: jumpbox
 spec:
     type: LoadBalancer
     selector:
@@ -25,9 +25,10 @@ spec:
 apiVersion: vmoperator.vmware.com/v1alpha5
 kind: VirtualMachineService
 metadata:
-    name: webserver-cip
+    name: webserver
 spec:
-    type: LoadBalancer
+    type: ClusterIP
+    clusterIp: None
     selector:
         app: webserver
     ports:

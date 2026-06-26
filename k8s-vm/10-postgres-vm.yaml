@@ -42,7 +42,7 @@ stringData:
             content: |
               [Resolve]
               DNS=$DNS_VIP
-              Domains=postgres.$NS.svc.cluster.local
+              Domains=$NS.svc.cluster.local
               FallbackDNS=10.1.1.1 8.8.8.8
         runcmd:
           - systemctl restart systemd-resolved
@@ -51,7 +51,7 @@ stringData:
           # - /opt/bank-app/k8s-vm/bank-register-dns.sh
           - |
             set -eu
-            PG_CONF_DIR=$(ls -d /etc/postgresql/*/main | head -n1)
+            export PG_CONF_DIR=$(ls -d /etc/postgresql/*/main | head -n1)
             echo "listen_addresses = '*'" >> "$PG_CONF_DIR/postgresql.conf"
             echo "host all all 0.0.0.0/0 md5" >> "$PG_CONF_DIR/pg_hba.conf"
           - systemctl restart postgresql
@@ -93,9 +93,10 @@ kind: VirtualMachineService
 metadata:
     name: postgres
 spec:
+    clusterIp: None
     selector:
       app: postgres
-    type: LoadBalancer
+    type: ClusterIP
     ports:
       - name: postgres
         port: 5432

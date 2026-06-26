@@ -42,7 +42,7 @@ stringData:
             content: |
               [Resolve]
               DNS=$DNS_VIP
-              Domains=backend.$NS.svc.cluster.local
+              Domains=$NS.svc.cluster.local
               FallbackDNS=10.1.1.1 8.8.8.8
           - path: /etc/systemd/system/bank-backend.service
             permissions: '0644'
@@ -103,13 +103,14 @@ kind: VirtualMachineService
 metadata:
     name: backend
 spec:
+    clusterIp: None
     selector:
       app: backend
-    type: LoadBalancer
+    type: ClusterIP
     ports:
       - name: http
-        port: 80
-        targetPort: 80
+        port: 4000
+        targetPort: 4000
         protocol: TCP
       - name: ssh
         port: 22

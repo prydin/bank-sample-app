@@ -4,6 +4,7 @@ metadata:
     name: jumpbox
 spec:
     type: LoadBalancer
+    clusterIP: None
     selector:
         app: jumpbox
     ports:
@@ -18,6 +19,7 @@ metadata:
     name: server
 spec:
     type: ClusterIP
+    clusterIP: None
     selector:
         app: server
     ports:
