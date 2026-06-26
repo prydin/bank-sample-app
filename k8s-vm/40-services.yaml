@@ -1,0 +1,53 @@
+apiVersion: vmoperator.vmware.com/v1alpha3
+kind: VirtualMachineService
+metadata:
+    name: postgres
+spec:
+    clusterIp: None
+    selector:
+      app: postgres
+    type: ClusterIP
+    ports:
+      - name: postgres
+        port: 5432
+        targetPort: 5432
+        protocol: TCP
+
+---
+apiVersion: vmoperator.vmware.com/v1alpha3
+kind: VirtualMachineService
+metadata:
+    name: backend
+spec:
+    clusterIp: None
+    selector:
+      app: backend
+    type: ClusterIP
+    ports:
+      - name: http
+        port: 4000
+        targetPort: 4000
+        protocol: TCP
+      - name: ssh
+        port: 22
+        targetPort: 22
+        protocol: TCP
+
+---
+apiVersion: vmoperator.vmware.com/v1alpha5
+kind: VirtualMachineService
+metadata:
+    name: frontend-lb
+spec:
+    type: LoadBalancer
+    selector:
+        app: frontend
+    ports:
+        - name: http
+          protocol: TCP
+          port: 80
+          targetPort: 80
+        - name: ssh
+          protocol: TCP
+          port: 22
+          targetPort: 22

@@ -1,10 +1,6 @@
 # Backend running inside a VMware VM Operator VirtualMachine (Ubuntu cloud image).
 # cloud-init installs Node.js 20 (NodeSource), clones this repo, builds the
 # real TypeScript backend with `npm run build`, and runs it under systemd.
-#
-# The frontend VM reaches this backend by hostname via the bind9 DNS server
-# (see 05-dns.yaml). No `VirtualMachineService` is needed -- the app VMs talk
-# directly to each other on the workload network.
 
 apiVersion: v1
 kind: Secret
