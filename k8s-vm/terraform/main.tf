@@ -1,10 +1,9 @@
-
 resource "kubernetes_manifest" "postgres" {
-  manifest = yamldecode(file("${path.module}/../10-postgres.yaml"))
+  manifest = merge(yamldecode(file("${path.module}/../10-postgres-vm.yaml")).metadata, { namespace = var.namespace})
 }
 
 resource "kubernetes_manifest" "backend" {
-  manifest = yamldecode(file("${path.module}/../20-backend.yaml"))
+  manifest = merge(yamldecode(file("${path.module}/../20-backend-vm.yaml")).metadata, { namespace = var.namespace})
 }
 
 resource "kubernetes_manifest" "frontend" {

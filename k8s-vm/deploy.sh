@@ -25,11 +25,14 @@ for f in \
     05-secrets.yaml \
     10-postgres-vm.yaml \
     20-backend-vm.yaml \
-    30-frontend.yaml \
     40-services.yaml
 do
     echo "Applying $f into namespace $NS..."
     envsubst < "$DIR/$f" '$NS $DNS_VIP' | kubectl -n "$NS" apply -f -
 done
+
+cd terraform
+terraform plan
+terraform apply -auto-approve
 
 echo "Done. Watch progress with: kubectl -n $NS get vm,vmservice,deploy,svc"

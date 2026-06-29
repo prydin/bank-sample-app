@@ -2,66 +2,7 @@
 # cloud-init installs the distro `postgresql` package, clones the project to
 # get the canonical db/init.sql + db/seed.sql, and applies them. Bootstrap
 # only runs on first boot of a fresh VM (delete + recreate to re-seed).
-#
-# The backend VM reaches this database by hostname via the bind9 DNS server
-# (see 05-dns.yaml). No `VirtualMachineService` is needed -- the app VMs talk
-# directly to each other on the workload network.
 
-apiVersion: v1
-kind: Secret
-metadata:
-    name: postgres-bootstrap
-type: Opaque
-stringData:
-    user-data: |
-        #cloud-config
-        hostname: postgres
-        users:
-          - name: ubuntu
-            sudo: ALL=(ALL) NOPASSWD:ALL
-            shell: /bin/bash
-            lock_passwd: false
-            ssh_authorized_keys:
-              - ssh-rsa AAAAB3NzaC1yc2EAAAADAQABAAABAQC7g2UVzeb551EVgpvy24KlswRL7Nr5cbJm/tuObWuw2HpUZ5HtoFyV3SbRyWWAU+CJDw0OaZVoxOGB5zV8jyKWoVrU4HAB7dABZNXXBreAbat7h9kf03KeJofRO/KFqj47FDJhj2yE3nCArK4aeOiuum4p7t7KL6zFXbXs7DGxeuEtxONLvMDqhyDyyQSJ7VUlA8AnO7mdHtnZ1kfTE/EHH0lj3qxaiZqkNC2onn/d64ctsGcmzgCt9BkgooQNd3c8HMCVs5LIZrc2ZbZvGGOvmApZwNCnKooTFGDawTNflPEV3FNdN6VN3lrR3mhaVKN5N2BS3froY/gY3Tq4a0kd holuser@console
-        package_update: true
-        package_upgrade: false
-        packages:
-          - postgresql
-          - git
-          - bind9-dnsutils
-        write_files:
-          - path: /etc/bank/tsig.key
-            permissions: '0600'
-            content: |
-              key "update-key" {
-                  algorithm hmac-sha256;
-                  secret "C5oOXzv1cN3Sd5VYx7uH+TpKQB8K5J0jSqQ5kPdJfFY=";
-              };
-          - path: /etc/systemd/resolved.conf.d/bank.conf
-            permissions: '0644'
-            content: |
-              [Resolve]
-              DNS=$DNS_VIP
-              Domains=$NS.svc.cluster.local
-              FallbackDNS=10.1.1.1 8.8.8.8
-        runcmd:
-          - systemctl restart systemd-resolved
-          - git clone https://github.com/prydin/bank-sample-app.git /opt/bank-app
-          - chmod +x /opt/bank-app/k8s-vm/bank-register-dns.sh
-          # - /opt/bank-app/k8s-vm/bank-register-dns.sh
-          - |
-            set -eu
-            export PG_CONF_DIR=$(ls -d /etc/postgresql/*/main | head -n1)
-            echo "listen_addresses = '*'" >> "$PG_CONF_DIR/postgresql.conf"
-            echo "host all all 0.0.0.0/0 md5" >> "$PG_CONF_DIR/pg_hba.conf"
-          - systemctl restart postgresql
-          - sudo -u postgres psql -c "CREATE USER bank WITH PASSWORD 'bank';"
-          - sudo -u postgres psql -c "CREATE DATABASE bankdb OWNER bank;"
-          - sudo -u postgres psql -d bankdb -f /opt/bank-app/db/init.sql
-          - sudo -u postgres psql -d bankdb -f /opt/bank-app/db/seed.sql
-          - sudo -u postgres psql -d bankdb -c "GRANT ALL ON ALL TABLES IN SCHEMA public TO bank;"
-          - sudo -u postgres psql -d bankdb -c "GRANT ALL ON ALL SEQUENCES IN SCHEMA public TO bank;"
----
 apiVersion: vmoperator.vmware.com/v1alpha5
 kind: VirtualMachine
 metadata:
@@ -87,18 +28,3 @@ spec:
                 name: postgres-bootstrap
                 key: user-data
 
----
-apiVersion: vmoperator.vmware.com/v1alpha3
-kind: VirtualMachineService
-metadata:
-    name: postgres
-spec:
-    clusterIp: None
-    selector:
-      app: postgres
-    type: ClusterIP
-    ports:
-      - name: postgres
-        port: 5432
-        targetPort: 5432
-        protocol: TCP
