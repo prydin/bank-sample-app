@@ -7,7 +7,6 @@ spec:
     selector:
       app: postgres
     type: ClusterIP
-    sessionAffinity: None
     ports:
       - name: postgres
         port: 5432
@@ -41,6 +40,7 @@ metadata:
     name: frontend-lb
 spec:
     type: LoadBalancer
+    sessoinAffinity: None
     selector:
         app: frontend
     ports:
