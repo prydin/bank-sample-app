@@ -14,7 +14,7 @@ spec:
     #   kubectl -n <namespace> get vmclass,vmimage
     #   kubectl get storageclass
     # to discover what is available in your Supervisor namespace.
-    className: best-effort-xsmall
+    className: best-effort-small
     # Friendly image name: noble-server-cloudimg-amd64
     imageName: ubuntu
     storageClass: vsan-default-storage-policy
