@@ -30,8 +30,7 @@ done
 
 cd terraform
 terraform init
-terraform apply -refresh-only -auto-approve
-terraform plan
-terraform apply -auto-approve
+terraform plan -state=~/.terraform/terraform.tfstate
+terraform apply -auto-approve -state=~/.terraform/terraform.tfstate
 
 echo "Done. Watch progress with: kubectl -n $NS get vm,vmservice,deploy,svc"
