@@ -22,10 +22,7 @@ export DNS_VIP=10.1.8.133
 DIR=$(CDPATH= cd -- "$(dirname -- "$0")" && pwd)
 
 for f in \
-    05-secrets.yaml \
-    10-postgres-vm.yaml \
-    20-backend-vm.yaml \
-    40-services.yaml
+    05-secrets.yaml 
 do
     echo "Applying $f into namespace $NS..."
     envsubst < "$DIR/$f" '$NS $DNS_VIP' | kubectl -n "$NS" apply -f -
