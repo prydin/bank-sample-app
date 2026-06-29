@@ -1,3 +1,9 @@
+terraform {
+  backend "local" {
+    path = "/opt/terraform/terraform.tfstate"
+  }
+}
+
 locals {
   postgres_vm = [for d in split("\n---\n", file("${path.module}/../10-postgres-vm.yaml")) : yamldecode(d) if try(yamldecode(d).kind, "") == "VirtualMachine"][0]
   backend_vm  = [for d in split("\n---\n", file("${path.module}/../20-backend-vm.yaml")) : yamldecode(d) if try(yamldecode(d).kind, "") == "VirtualMachine"][0]
