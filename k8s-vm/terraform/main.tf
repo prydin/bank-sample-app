@@ -2,9 +2,9 @@
 # Kubernetes manifests that live in the parent directory (the same files
 # deploy.sh applies) and instantiate every document they contain.
 #
-# $NS and $DNS_VIP are only referenced in 05-secrets.yaml, which we assume is
-# already loaded, so no substitution is needed here -- we just split the
-# multi-document YAML and create one kubernetes_manifest per document.
+# The bootstrap Secrets (and $NS/$DNS_VIP they rely on) are assumed to already
+# be loaded -- e.g. via 05-secrets.yaml -- so we skip any Secret documents and
+# only instantiate the VirtualMachine / VirtualMachineService resources.
 locals {
   # Manifest files to load, relative to this module.
   vm_manifest_files = [
@@ -12,12 +12,12 @@ locals {
     "${path.module}/../20-backend-vm.yaml",
   ]
 
-  # Decode every YAML document in the manifest files.
+  # Decode every YAML document in the manifest files, skipping Secrets.
   vm_manifest_documents = flatten([
     for f in local.vm_manifest_files : [
       for doc in split("\n---\n", file(f)) :
       yamldecode(doc)
-      if trimspace(doc) != ""
+      if trimspace(doc) != "" && yamldecode(doc).kind != "Secret"
     ]
   ])
 }
