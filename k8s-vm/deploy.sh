@@ -30,7 +30,7 @@ done
 
 cd terraform
 terraform init
-terraform refresh
+terraform apply refresh-only
 terraform plan
 terraform apply -auto-approve
 
