@@ -8,9 +8,3 @@ variable "vm_count" {
   type        = number
   default     = 1
 }
-
-variable "dns_vip" {
-  description = "DNS server VIP injected into the backend/postgres cloud-init (equivalent to DNS_VIP in deploy.sh)."
-  type        = string
-  default     = "10.1.8.133"
-}
