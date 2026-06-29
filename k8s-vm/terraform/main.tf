@@ -1,5 +1,46 @@
+# Backend and Postgres are not coded in HCL. Instead we load the canonical
+# Kubernetes manifests that live in the parent directory (the same files
+# deploy.sh applies) and instantiate every document they contain.
+#
+# deploy.sh substitutes $NS and $DNS_VIP via envsubst before applying; we do the
+# same substitution here, then split the multi-document YAML and create one
+# kubernetes_manifest per document.
+locals {
+  # Manifest files to load, relative to this module.
+  vm_manifest_files = [
+    "${path.module}/../10-postgres-vm.yaml",
+    "${path.module}/../20-backend-vm.yaml",
+  ]
+
+  # Decode every YAML document, substituting the env vars deploy.sh injects.
+  vm_manifest_documents = flatten([
+    for f in local.vm_manifest_files : [
+      for doc in split("\n---\n", replace(replace(file(f), "$DNS_VIP", var.dns_vip), "$NS", var.namespace)) :
+      yamldecode(doc)
+      if trimspace(doc) != ""
+    ]
+  ])
+}
+
+resource "kubernetes_manifest" "backend_postgres" {
+  for_each = {
+    for doc in local.vm_manifest_documents :
+    "${doc.kind}/${doc.metadata.name}" => doc
+  }
+
+  # The manifests don't hard-code a namespace (deploy.sh passes `kubectl -n`),
+  # so inject it the same way the frontend resource below does.
+  manifest = merge(each.value, {
+    metadata = merge(each.value.metadata, {
+      namespace = var.namespace
+    })
+  })
+}
+
 # Frontend VirtualMachines (VM Operator). The frontend-bootstrap Secret and the
 # frontend-lb VirtualMachineService they rely on are created elsewhere.
+
+
 resource "kubernetes_manifest" "frontend" {
   count = var.vm_count
 
