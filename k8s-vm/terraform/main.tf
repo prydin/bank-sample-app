@@ -5,10 +5,20 @@ locals {
 
 resource "kubernetes_manifest" "postgres" {
   manifest = merge(local.postgres_vm, { metadata = merge(local.postgres_vm.metadata, { namespace = var.namespace }) })
+
+  field_manager {
+    name            = "terraform"
+    force_conflicts = true  # Overwrites/adopts the resource if it already exists
+  }
 }
 
 resource "kubernetes_manifest" "backend" {
   manifest = merge(local.backend_vm, { metadata = merge(local.backend_vm.metadata, { namespace = var.namespace }) })
+
+    field_manager {
+    name            = "terraform"
+    force_conflicts = true  # Overwrites/adopts the resource if it already exists
+  }
 }
 
 resource "kubernetes_manifest" "frontend" {
