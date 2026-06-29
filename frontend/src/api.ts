@@ -42,3 +42,11 @@ export function formatMoney(cents: number, currency = 'USD'): string {
 export function maskAccountNumber(num: string): string {
     return `••••${num.slice(-4)}`;
 }
+
+export async function getServerIp(): Promise<string> {
+    const res = await fetch('/server-ip');
+    if (!res.ok) {
+        throw new Error(`Request failed: ${res.status}`);
+    }
+    return (await res.text()).trim();
+}
