@@ -9,7 +9,7 @@ jobs:
   deploy:
     runs-on: self-hosted
     env:
-      NS: bank-vm-h93q9
+      NS: bank-vm-r3n8y
     steps:
       - uses: actions/checkout@v4
 
