@@ -2,4 +2,4 @@
 
 # VM Operator (Supervisor) namespace to deploy into.
 namespace = "bank-vm-r3n8y"
-vm_count = 1
+vm_count = 2
