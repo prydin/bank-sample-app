@@ -44,11 +44,11 @@ resource "null_resource" "ova_download" {
   }
 }
 
-resource "vcfa_content_library_item" "ova" {
-  name               = "ubuntu"
-  description        = "simple ubuntu image"
-  content_library_id = vcfa_content_library.cl.id
-  file_paths         = ["${path.module}/ubuntu.ova"]
-  depends_on = [null_resource.ova_download]
-}
+#resource "vcfa_content_library_item" "ova" {
+#  name               = "ubuntu"
+#  description        = "simple ubuntu image"
+#  content_library_id = vcfa_content_library.cl.id
+#  file_paths         = ["${path.module}/ubuntu.ova"]
+#  depends_on = [null_resource.ova_download]
+#}
 
