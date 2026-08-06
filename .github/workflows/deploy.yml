@@ -9,7 +9,7 @@ jobs:
   deploy:
     runs-on: self-hosted
     env:
-      NS: bank-vm-r3n8y
+      NS: bank-yhjvg
     steps:
       - uses: actions/checkout@v4
 
@@ -67,5 +67,5 @@ jobs:
 
       - name: apply changes
         continue-on-error: true
-        run: cd k8s-vm && ./deploy.sh bank-vm-r3n8y
+        run: cd k8s-vm && ./deploy.sh bank-yhjvg
         
