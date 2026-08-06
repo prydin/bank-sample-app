@@ -140,3 +140,7 @@ dist
 kubeconfig
 kubeconfig.*
 *.kubeconfig
+
+# Disk images
+*.ova
+*.iso
