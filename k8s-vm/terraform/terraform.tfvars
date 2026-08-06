@@ -4,5 +4,5 @@
 namespace = "bank-yhjvg"
 region_name = "us-east-a"
 org_name = "Acme-East-A"
-vm_count = 2
+vm_count = 3
 vcfa_url = "https://auto-a.site-a.vcf.lab"
