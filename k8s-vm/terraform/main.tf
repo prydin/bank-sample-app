@@ -46,7 +46,7 @@ resource "kubernetes_manifest" "frontend" {
       # Adjust these to a class, image, and StorageClass that exist in your
       # Supervisor namespace -- see the README.
       className     = "best-effort-small"
-      imageName     = "ubuntu"
+      imageName     = "noble-server-cloudimg-amd64"
       storageClass  = "vsan-default-storage-policy"
       powerState    = "PoweredOn"
 

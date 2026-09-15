@@ -14,7 +14,7 @@ terraform {
 
 locals {
     # api_token = file("~/Desktop/vcfa_api_token.txt")
-    api_token = "I3nbvkXq9m9gzcYRRk226Xr1N3J27cZn"
+    api_token = "xKLjyKuTUxOO00ZwQZxpV6bQzvlmIQXr"
 }
 
 

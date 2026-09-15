@@ -20,7 +20,7 @@ spec:
     # Supervisor namespace -- see the README.
     className: best-effort-small
     # Friendly image name: noble-server-cloudimg-amd64
-    imageName: ubuntu
+    imageName: noble-server-cloudimg-amd64 
     storageClass: vsan-default-storage-policy
     powerState: PoweredOn
     network:
