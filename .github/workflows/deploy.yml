@@ -67,5 +67,5 @@ jobs:
 
       - name: apply changes
         continue-on-error: true
-        run: cd k8s-vm && ./deploy.sh bank-yhjvg
+        run: cd k8s-vm && ./deploy.sh development-east-a-h3f2l
         
